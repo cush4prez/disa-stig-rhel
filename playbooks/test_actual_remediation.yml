@@ -107,6 +107,8 @@
 
     - name: Execute remediation script (DRY RUN - show what would happen)
       ansible.builtin.shell: |
+        set -o pipefail
+
         # Run first 10 remediation functions only as a test
         source "{{ test_dir }}/remediation.sh"
 
@@ -238,13 +240,12 @@
           - "  After:   {{ test_dir }}/after.html"
           - ""
           - "DIAGNOSIS:"
-          - "{% if improvement | float > 20 %}"
-          - "  ✓ REMEDIATION WORKING! Significant improvement detected"
-          - "{% elif improvement | float > 5 %}"
-          - "  ~ Partial improvement - some STIGs applied"
-          - "{% else %}"
-          - "  ✗ NO IMPROVEMENT - remediation not working correctly"
-          - "  Check remediation log: {{ test_dir }}/remediation_full.log"
-          - "{% endif %}"
+          - >-
+            {{ '✓ REMEDIATION WORKING! Significant improvement detected'
+               if improvement | float > 20
+               else '~ Partial improvement - some security controls applied'
+               if improvement | float > 5
+               else '✗ NO IMPROVEMENT - remediation not working correctly' }}
+          - "{{ '  Check remediation log: ' ~ test_dir ~ '/remediation_full.log' if improvement | float <= 5 else '' }}"
           - "========================================================================="
       when: full_remediation is not skipped
