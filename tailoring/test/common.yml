@@ -1,0 +1,8 @@
+---
+# Test Tailoring Profile
+# Purpose: Testing the tailoring system
+
+var_password_pam_minlen: 20
+var_accounts_tmout: 900
+var_accounts_passwords_pam_faillock_deny: 5
+sshd_idle_timeout_value: 600

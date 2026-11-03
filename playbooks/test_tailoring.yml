@@ -1,0 +1,41 @@
+---
+# Test playbook for tailoring functionality
+# This playbook tests loading tailoring variables without actually running STIG hardening
+
+- name: Test STIG Tailoring Loader
+  hosts: localhost
+  gather_facts: true
+
+  vars:
+    # Simulate the role's directory structure
+    playbook_dir: "{{ playbook_dir }}"
+    rhel_stig_with_rollback_tailoring_profile: "test"
+
+  tasks:
+    - name: Load tailoring variables
+      ansible.builtin.include_tasks: ../roles/rhel_stig_with_rollback/tasks/load_tailoring.yml
+
+    - name: Display loaded tailoring variables
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================="
+          - "TAILORING VARIABLES LOADED SUCCESSFULLY"
+          - "========================================================================="
+          - "Profile: {{ rhel_stig_with_rollback_tailoring_profile }}"
+          - ""
+          - "Sample Variables:"
+          - "  var_password_pam_minlen: {{ var_password_pam_minlen | default('NOT SET') }}"
+          - "  var_accounts_tmout: {{ var_accounts_tmout | default('NOT SET') }}"
+          - "  var_accounts_passwords_pam_faillock_deny: {{ var_accounts_passwords_pam_faillock_deny | default('NOT SET') }}"
+          - "  sshd_idle_timeout_value: {{ sshd_idle_timeout_value | default('NOT SET') }}"
+          - "========================================================================="
+
+    - name: Verify expected values
+      ansible.builtin.assert:
+        that:
+          - var_password_pam_minlen == 20
+          - var_accounts_tmout == 900
+          - var_accounts_passwords_pam_faillock_deny == 5
+          - sshd_idle_timeout_value == 600
+        success_msg: "✅ All tailoring variables loaded correctly!"
+        fail_msg: "❌ Tailoring variables did not load as expected"

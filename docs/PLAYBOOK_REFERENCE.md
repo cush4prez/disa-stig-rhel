@@ -37,6 +37,15 @@ ansible-playbook -i inventory playbooks/rhel_stig_with_rollback.yml
 ansible-playbook -i inventory playbooks/rhel_stig_with_rollback.yml \
   -e rhel_stig_with_rollback_stig_rules_to_apply='["sysctl_crypto_fips_enabled","audit_rules_login_events"]'
 
+# CLI - with organization tailoring
+ansible-playbook -i inventory playbooks/rhel_stig_with_rollback.yml \
+  -e rhel_stig_with_rollback_tailoring_profile=myorg
+
+# CLI - tailoring + selective mode
+ansible-playbook -i inventory playbooks/rhel_stig_with_rollback.yml \
+  -e rhel_stig_with_rollback_tailoring_profile=myorg \
+  -e rhel_stig_with_rollback_stig_rules_to_apply='["sysctl_crypto_fips_enabled"]'
+
 # AAP - use survey
 ```
 
@@ -45,17 +54,19 @@ ansible-playbook -i inventory playbooks/rhel_stig_with_rollback.yml \
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `rhel_stig_with_rollback_stig_rules_to_apply` | `[]` | List of rule IDs (empty = full) |
+| `rhel_stig_with_rollback_tailoring_profile` | `""` | Organization tailoring profile (empty = defaults) |
 | `rhel_stig_with_rollback_apply_remediations` | `true` | Apply fixes |
 | `rhel_stig_with_rollback_auto_rollback_on_failure` | `true` | Auto-rollback |
 | `rhel_stig_with_rollback_enable_auto_backup` | `true` | Create backup |
 
 **Phases:**
-1. Pre-hardening validation
-2. Backup creation
-3. Baseline audit (selective or full)
-4. Remediation (Ansible playbook)
-5. Operational verification
-6. Summary and rollback instructions
+1. Load organization tailoring variables (if specified)
+2. Pre-hardening validation
+3. Backup creation
+4. Baseline audit (selective or full)
+5. Remediation (Ansible playbook with tailored variables)
+6. Operational verification
+7. Summary and rollback instructions
 
 **Output:**
 - Audit reports: `/opt/stig_audit/`
@@ -227,6 +238,54 @@ ansible-playbook -i inventory playbooks/perform_rollback.yml \
 - Requires backup was created during hardening
 - Does not restore user data or application files
 - System will reboot if needed
+
+---
+
+### test_tailoring.yml
+
+**Purpose:** Test and validate organization tailoring profile loading.
+
+**Use Case:** Verify tailoring files are correctly formatted and load properly
+
+**Features:**
+- Validates tailoring directory exists
+- Loads common and version-specific variables
+- Displays loaded variables
+- Verifies expected values match
+
+**Usage:**
+
+```bash
+# Test specific tailoring profile
+ansible-playbook playbooks/test_tailoring.yml \
+  -e rhel_stig_with_rollback_tailoring_profile=myorg
+
+# Test with custom tailoring location
+ansible-playbook playbooks/test_tailoring.yml \
+  -e rhel_stig_with_rollback_tailoring_profile=production
+```
+
+**Output:**
+```
+========================================================================
+TAILORING VARIABLES LOADED SUCCESSFULLY
+========================================================================
+Profile: myorg
+
+Sample Variables:
+  var_password_pam_minlen: 20
+  var_accounts_tmout: 900
+  var_accounts_passwords_pam_faillock_deny: 5
+  sshd_idle_timeout_value: 600
+========================================================================
+✅ All tailoring variables loaded correctly!
+```
+
+**Notes:**
+- No system changes made
+- Validates YAML syntax
+- Checks for common tailoring errors
+- See [docs/TAILORING_GUIDE.md](TAILORING_GUIDE.md) for creating tailoring files
 
 ---
 
@@ -510,6 +569,7 @@ ansible-playbook -i inventory playbooks/test_actual_remediation.yml
 |----------|---------------------|
 | Initial STIG hardening | `rhel_stig_with_rollback.yml` or `rhel_stig_with_rollback_interactive.yml` |
 | AAP deployment | `rhel_stig_with_rollback.yml` (with survey) |
+| Organization-specific hardening | `rhel_stig_with_rollback.yml` (with tailoring profile) |
 | Just check compliance | `rhel_stig_audit_only.yml` |
 | Fix specific STIG rules only | `rhel_stig_with_rollback.yml` (selective mode) |
 | Detailed compliance report | `final_audit_report.yml` |
@@ -518,6 +578,7 @@ ansible-playbook -i inventory playbooks/test_actual_remediation.yml
 | Troubleshoot remediation | `diagnose_stig_remediation.yml` |
 | Pre-change backup | `rhel_stig_backup_state.yml` |
 | Health check | `verify_system_operational.yml` |
+| Test tailoring profile | `test_tailoring.yml` |
 
 ---
 
@@ -564,6 +625,46 @@ ansible-playbook -i inventory playbooks/perform_rollback.yml \
 ansible-playbook -i inventory playbooks/verify_system_operational.yml
 ```
 
+### Organization-Specific Hardening Workflow
+
+```bash
+# 1. Create tailoring profile
+mkdir -p tailoring/myorg
+cp tailoring/example_tailoring.yml tailoring/myorg/common.yml
+vim tailoring/myorg/common.yml  # Edit with your values
+
+# 2. Test tailoring loads correctly
+ansible-playbook playbooks/test_tailoring.yml \
+  -e rhel_stig_with_rollback_tailoring_profile=myorg
+
+# 3. Audit with tailoring (no changes)
+ansible-playbook -i inventory playbooks/rhel_stig_audit_only.yml \
+  -e rhel_stig_with_rollback_tailoring_profile=myorg
+
+# 4. Apply hardening with tailoring
+ansible-playbook -i inventory playbooks/rhel_stig_with_rollback.yml \
+  -e rhel_stig_with_rollback_tailoring_profile=myorg
+
+# 5. Verify compliance
+ansible-playbook -i inventory playbooks/final_audit_report.yml
+```
+
+### Multi-Environment Tailoring Workflow
+
+```bash
+# Development environment
+ansible-playbook -i dev_inventory playbooks/rhel_stig_with_rollback.yml \
+  -e rhel_stig_with_rollback_tailoring_profile=development
+
+# Staging environment (production-like settings)
+ansible-playbook -i staging_inventory playbooks/rhel_stig_with_rollback.yml \
+  -e rhel_stig_with_rollback_tailoring_profile=staging
+
+# Production environment (strictest settings)
+ansible-playbook -i prod_inventory playbooks/rhel_stig_with_rollback.yml \
+  -e rhel_stig_with_rollback_tailoring_profile=production
+```
+
 ---
 
 ## All Available Playbooks
@@ -586,4 +687,131 @@ ansible-playbook -i inventory playbooks/verify_system_operational.yml
 | `debug_oscap_score.yml` | Test | No | No |
 | `diagnose_score_issue.yml` | Test | No | No |
 | `test_actual_remediation.yml` | Test | Yes | No |
+| `test_tailoring.yml` | Test | No | No |
 | `site.yml` | Main | Yes | No (uses role) |
+
+---
+
+## Organization Tailoring
+
+All production playbooks support organization-specific STIG variable customization through tailoring profiles.
+
+### What is Tailoring?
+
+Tailoring allows you to customize STIG security control variables to meet your organization's specific requirements:
+
+- **Password policies** - Length, complexity, history
+- **Account lockout** - Failed attempts, lockout duration
+- **Session timeouts** - Shell and SSH idle timeouts
+- **Audit configuration** - Log size, retention, actions
+- **Cryptography** - Crypto policies, algorithms
+- **Network security** - Firewall defaults, SSH hardening
+
+### Quick Start
+
+```bash
+# 1. Create profile
+mkdir -p tailoring/myorg
+cp tailoring/example_tailoring.yml tailoring/myorg/common.yml
+
+# 2. Edit variables
+vim tailoring/myorg/common.yml
+
+# 3. Use with any playbook
+ansible-playbook -i inventory playbooks/rhel_stig_with_rollback.yml \
+  -e rhel_stig_with_rollback_tailoring_profile=myorg
+```
+
+### Tailoring Files
+
+```
+tailoring/
+├── myorg/
+│   ├── common.yml          # All RHEL versions
+│   ├── rhel8.yml          # RHEL 8 overrides (optional)
+│   ├── rhel9.yml          # RHEL 9 overrides (optional)
+│   └── rhel10.yml         # RHEL 10 overrides (optional)
+```
+
+### Variable Precedence
+
+Variables are loaded in order (later overrides earlier):
+
+1. Role defaults
+2. Tailoring `common.yml`
+3. Tailoring version-specific file
+4. Group variables
+5. Host variables
+6. Playbook variables
+7. Extra variables (`-e`)
+
+### Common Use Cases
+
+**Financial Services (PCI-DSS):**
+```yaml
+# tailoring/financial/common.yml
+var_password_pam_minlen: 20
+var_accounts_passwords_pam_faillock_deny: 3
+var_accounts_tmout: 600
+var_system_crypto_policy: "FIPS:OSPP"
+```
+
+**Healthcare (HIPAA):**
+```yaml
+# tailoring/healthcare/common.yml
+var_password_pam_minlen: 16
+var_accounts_tmout: 900
+var_auditd_num_logs: 15  # 60 day retention
+```
+
+**Development Environment:**
+```yaml
+# tailoring/development/common.yml
+var_password_pam_minlen: 12
+var_accounts_passwords_pam_faillock_deny: 5
+var_accounts_tmout: 1800  # Longer for debugging
+```
+
+### Playbooks with Tailoring Support
+
+All these playbooks support the `rhel_stig_with_rollback_tailoring_profile` variable:
+
+- `rhel_stig_with_rollback.yml` - Main hardening with tailoring
+- `rhel_stig_with_rollback_interactive.yml` - Interactive with tailoring
+- `rhel_stig_audit_only.yml` - Audit with tailored variables
+- `final_audit_report.yml` - Report using tailored settings
+- `test_tailoring.yml` - Test profile loading
+
+### Documentation
+
+- **[TAILORING_GUIDE.md](TAILORING_GUIDE.md)** - Complete tailoring documentation
+- **[TAILORING_EXAMPLES.md](TAILORING_EXAMPLES.md)** - Real-world examples (PCI-DSS, HIPAA, DoD, etc.)
+- **[tailoring/README.md](../tailoring/README.md)** - Quick reference
+- **[tailoring/QUICKSTART.md](../tailoring/QUICKSTART.md)** - 5-minute getting started guide
+
+### Testing Tailoring
+
+```bash
+# Validate profile loads correctly
+ansible-playbook playbooks/test_tailoring.yml \
+  -e rhel_stig_with_rollback_tailoring_profile=myorg
+
+# Test in audit-only mode first
+ansible-playbook -i inventory playbooks/rhel_stig_audit_only.yml \
+  -e rhel_stig_with_rollback_tailoring_profile=myorg
+```
+
+### AAP Integration
+
+Add tailoring profile selection to AAP survey:
+
+```json
+{
+  "question_name": "Organization Tailoring Profile",
+  "variable": "rhel_stig_with_rollback_tailoring_profile",
+  "type": "text",
+  "default": ""
+}
+```
+
+See `docs/aap_survey_configuration.json` for complete example.

@@ -1,0 +1,116 @@
+---
+# Load organization-specific STIG tailoring variables
+# This task loads custom security control variables from tailoring files
+
+- name: Check if tailoring profile is specified
+  ansible.builtin.set_fact:
+    rhel_stig_with_rollback_use_tailoring: >-
+      {{ rhel_stig_with_rollback_tailoring_profile is defined and
+         rhel_stig_with_rollback_tailoring_profile | length > 0 }}
+
+- name: Display tailoring status
+  ansible.builtin.debug:
+    msg:
+      - "========================================================================="
+      - "STIG TAILORING CONFIGURATION"
+      - "========================================================================="
+      - >-
+        {% if rhel_stig_with_rollback_use_tailoring %}
+        Tailoring Profile: {{ rhel_stig_with_rollback_tailoring_profile }}
+        {% else %}
+        No tailoring profile specified - using defaults
+        {% endif %}
+      - "========================================================================="
+
+- name: Load tailoring variables
+  when: rhel_stig_with_rollback_use_tailoring
+  block:
+    - name: Set tailoring base path
+      ansible.builtin.set_fact:
+        rhel_stig_with_rollback_tailoring_base: >-
+          {{ playbook_dir }}/../tailoring/{{ rhel_stig_with_rollback_tailoring_profile }}
+
+    - name: Check if tailoring directory exists
+      ansible.builtin.stat:
+        path: "{{ rhel_stig_with_rollback_tailoring_base }}"
+      delegate_to: localhost
+      become: false
+      register: rhel_stig_with_rollback_tailoring_dir_stat
+
+    - name: Fail if tailoring directory not found
+      ansible.builtin.fail:
+        msg:
+          - "Tailoring profile directory not found: {{ rhel_stig_with_rollback_tailoring_base }}"
+          - "Create the directory and add tailoring files:"
+          - "  mkdir -p {{ rhel_stig_with_rollback_tailoring_base }}"
+          - "  cp tailoring/example_tailoring.yml {{ rhel_stig_with_rollback_tailoring_base }}/common.yml"
+          - "See tailoring/README.md for details"
+      when: not rhel_stig_with_rollback_tailoring_dir_stat.stat.exists
+
+    - name: Check for common tailoring file
+      ansible.builtin.stat:
+        path: "{{ rhel_stig_with_rollback_tailoring_base }}/common.yml"
+      delegate_to: localhost
+      become: false
+      register: rhel_stig_with_rollback_tailoring_common_stat
+
+    - name: Check for version-specific tailoring file
+      ansible.builtin.stat:
+        path: "{{ rhel_stig_with_rollback_tailoring_base }}/rhel{{ ansible_distribution_major_version }}.yml"
+      delegate_to: localhost
+      become: false
+      register: rhel_stig_with_rollback_tailoring_version_stat
+
+    - name: Load common tailoring variables
+      ansible.builtin.include_vars:
+        file: "{{ rhel_stig_with_rollback_tailoring_base }}/common.yml"
+        name: rhel_stig_with_rollback_tailoring_common_vars
+      when: rhel_stig_with_rollback_tailoring_common_stat.stat.exists
+
+    - name: Load version-specific tailoring variables
+      ansible.builtin.include_vars:
+        file: "{{ rhel_stig_with_rollback_tailoring_base }}/rhel{{ ansible_distribution_major_version }}.yml"
+        name: rhel_stig_with_rollback_tailoring_version_vars
+      when: rhel_stig_with_rollback_tailoring_version_stat.stat.exists
+
+    - name: Merge tailoring variables (common first, then version-specific)
+      ansible.builtin.set_fact:
+        rhel_stig_with_rollback_tailoring_vars: >-
+          {{ (rhel_stig_with_rollback_tailoring_common_vars | default({})) |
+             combine(rhel_stig_with_rollback_tailoring_version_vars | default({})) }}
+
+    - name: Apply tailoring variables to current scope
+      ansible.builtin.set_fact:
+        "{{ item.key }}": "{{ item.value }}"
+      loop: "{{ rhel_stig_with_rollback_tailoring_vars | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: Display loaded tailoring information
+      ansible.builtin.debug:
+        msg:
+          - "Tailoring profile loaded: {{ rhel_stig_with_rollback_tailoring_profile }}"
+          - "Common variables: {% if rhel_stig_with_rollback_tailoring_common_stat.stat.exists %}✅ Loaded{% else %}⚠️  Not found{% endif %}"
+          - >-
+            Version-specific (RHEL {{ ansible_distribution_major_version }}):
+            {% if rhel_stig_with_rollback_tailoring_version_stat.stat.exists %}✅ Loaded{% else %}Not found (optional){% endif %}
+          - "Total variables loaded: {{ rhel_stig_with_rollback_tailoring_vars | length }}"
+
+    - name: Display sample of loaded variables
+      ansible.builtin.debug:
+        msg:
+          - "Sample tailored variables:"
+          - "  var_password_pam_minlen: {{ var_password_pam_minlen | default('not set') }}"
+          - "  var_accounts_tmout: {{ var_accounts_tmout | default('not set') }}"
+          - "  var_accounts_passwords_pam_faillock_deny: {{ var_accounts_passwords_pam_faillock_deny | default('not set') }}"
+          - "  sshd_idle_timeout_value: {{ sshd_idle_timeout_value | default('not set') }}"
+      when: rhel_stig_with_rollback_tailoring_vars | length > 0
+
+    - name: Save tailoring information to audit log
+      ansible.builtin.set_fact:
+        rhel_stig_with_rollback_tailoring_info:
+          profile: "{{ rhel_stig_with_rollback_tailoring_profile }}"
+          common_file: "{{ rhel_stig_with_rollback_tailoring_common_stat.stat.exists }}"
+          version_file: "{{ rhel_stig_with_rollback_tailoring_version_stat.stat.exists }}"
+          variables_count: "{{ rhel_stig_with_rollback_tailoring_vars | length }}"
+          rhel_version: "{{ ansible_distribution_major_version }}"
