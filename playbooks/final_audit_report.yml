@@ -1,0 +1,290 @@
+---
+# Final STIG Audit Report
+# Runs system operational verification and detailed compliance audit
+# Shows compliance score and failed controls by category (CAT I, II, III)
+
+- name: RHEL DISA STIG Final Audit Report
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    stig_work_dir: "/opt/stig_work"
+    stig_audit_dir: "/opt/stig_audit"
+    stig_profile_id: "xccdf_org.ssgproject.content_profile_stig"
+    scap_ds_path: "/usr/share/xml/scap/ssg/content/ssg-rhel{{ ansible_distribution_major_version }}-ds.xml"
+
+  tasks:
+    #########################################################################
+    # PHASE 1: SYSTEM OPERATIONAL VERIFICATION
+    #########################################################################
+
+    - name: Initialize operational status
+      ansible.builtin.set_fact:
+        system_is_operable: true
+        operational_failures: []
+        operational_warnings: []
+
+    - name: Test basic command execution
+      ansible.builtin.command: echo "System responsive"
+      register: echo_test
+      failed_when: false
+      changed_when: false
+
+    - name: Check command execution
+      ansible.builtin.set_fact:
+        system_is_operable: false
+        operational_failures: "{{ operational_failures + ['Cannot execute basic commands'] }}"
+      when: echo_test.rc != 0
+
+    - name: Check SSH service status
+      ansible.builtin.systemd:
+        name: sshd
+      register: sshd_status
+      failed_when: false
+
+    - name: Verify SSH is running
+      ansible.builtin.set_fact:
+        system_is_operable: false
+        operational_failures: "{{ operational_failures + ['SSH service is not running'] }}"
+      when: sshd_status.status.ActiveState | default('unknown') != "active"
+
+    - name: Test SSH is listening
+      ansible.builtin.wait_for:
+        port: 22
+        timeout: 5
+        state: started
+      register: ssh_listening
+      failed_when: false
+
+    - name: Check SSH port accessibility
+      ansible.builtin.set_fact:
+        system_is_operable: false
+        operational_failures: "{{ operational_failures + ['SSH not listening on port 22'] }}"
+      when: ssh_listening.failed | default(false)
+
+    - name: Verify critical PAM files exist
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /etc/pam.d/system-auth
+        - /etc/pam.d/password-auth
+        - /etc/pam.d/sshd
+      register: pam_files
+      failed_when: false
+
+    - name: Check PAM configuration
+      ansible.builtin.set_fact:
+        system_is_operable: false
+        operational_failures: "{{ operational_failures + ['Critical PAM files missing'] }}"
+      when: pam_files.results | selectattr('stat.exists', 'equalto', false) | list | length > 0
+
+    - name: Check root filesystem is writable
+      ansible.builtin.command: touch /tmp/.stig_audit_test
+      register: fs_write_test
+      failed_when: false
+      changed_when: false
+
+    - name: Verify filesystem is writable
+      ansible.builtin.set_fact:
+        system_is_operable: false
+        operational_failures: "{{ operational_failures + ['Root filesystem is read-only'] }}"
+      when: fs_write_test.rc != 0
+
+    - name: Cleanup test file
+      ansible.builtin.file:
+        path: /tmp/.stig_audit_test
+        state: absent
+      failed_when: false
+
+    #########################################################################
+    # PHASE 2: COMPLIANCE AUDIT
+    #########################################################################
+
+    - name: Create STIG directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0750'
+      loop:
+        - "{{ stig_audit_dir }}"
+        - "{{ stig_work_dir }}"
+
+    - name: Set audit timestamp
+      ansible.builtin.set_fact:
+        audit_timestamp: "{{ ansible_date_time.epoch }}"
+
+    - name: Verify SCAP content exists
+      ansible.builtin.stat:
+        path: "{{ scap_ds_path }}"
+      register: scap_stat
+
+    - name: Install SCAP content if missing
+      ansible.builtin.dnf:
+        name:
+          - openscap-scanner
+          - scap-security-guide
+        state: present
+      when: not scap_stat.stat.exists
+
+    - name: Run comprehensive STIG audit
+      ansible.builtin.command: >
+        oscap xccdf eval
+        --profile {{ stig_profile_id }}
+        --results {{ stig_audit_dir }}/final_audit_{{ audit_timestamp }}.xml
+        --results-arf {{ stig_audit_dir }}/final_audit_{{ audit_timestamp }}-arf.xml
+        --report {{ stig_audit_dir }}/final_audit_{{ audit_timestamp }}.html
+        {{ scap_ds_path }}
+      register: audit_scan
+      failed_when: false
+      changed_when: false
+
+    - name: Check if audit XML exists
+      ansible.builtin.stat:
+        path: "{{ stig_audit_dir }}/final_audit_{{ audit_timestamp }}.xml"
+      register: audit_xml_stat
+
+    - name: Fail if audit did not generate results
+      ansible.builtin.fail:
+        msg: "OSCAP audit failed to generate results XML"
+      when: not audit_xml_stat.stat.exists
+
+    #########################################################################
+    # PHASE 3: PARSE RESULTS & COMPLIANCE SCORE
+    #########################################################################
+
+    - name: Copy parse score script
+      ansible.builtin.copy:
+        content: "{{ lookup('file', playbook_dir ~ '/../files/parse_oscap_score.py') }}"
+        dest: "{{ stig_work_dir }}/parse_oscap_score.py"
+        mode: '0755'
+
+    - name: Parse compliance score
+      ansible.builtin.command: "{{ stig_work_dir }}/parse_oscap_score.py {{ stig_audit_dir }}/final_audit_{{ audit_timestamp }}.xml"
+      register: compliance_score
+      changed_when: false
+
+    - name: Copy failures parser script
+      ansible.builtin.copy:
+        content: "{{ lookup('file', playbook_dir ~ '/../files/parse_oscap_failures.py') }}"
+        dest: "{{ stig_work_dir }}/parse_oscap_failures.py"
+        mode: '0755'
+
+    - name: Parse failures by category
+      ansible.builtin.command: "{{ stig_work_dir }}/parse_oscap_failures.py {{ stig_audit_dir }}/final_audit_{{ audit_timestamp }}.xml"
+      register: failures_json
+      changed_when: false
+
+    - name: Parse failures data
+      ansible.builtin.set_fact:
+        failures_data: "{{ failures_json.stdout | from_json }}"
+
+    - name: Assess compliance level
+      ansible.builtin.set_fact:
+        compliance_level: >-
+          {%- if compliance_score.stdout | float >= 95 -%}
+          EXCELLENT
+          {%- elif compliance_score.stdout | float >= 90 -%}
+          VERY GOOD
+          {%- elif compliance_score.stdout | float >= 80 -%}
+          GOOD
+          {%- elif compliance_score.stdout | float >= 70 -%}
+          ACCEPTABLE
+          {%- elif compliance_score.stdout | float >= 50 -%}
+          NEEDS IMPROVEMENT
+          {%- else -%}
+          CRITICAL
+          {%- endif -%}
+
+    - name: Determine if production ready
+      ansible.builtin.set_fact:
+        production_ready: >-
+          {{ system_is_operable and
+             failures_data.cat1 | length == 0 and
+             compliance_score.stdout | float >= 80 }}
+
+    #########################################################################
+    # PHASE 4: EXECUTIVE CONSOLE DASHBOARD
+    #########################################################################
+
+    - name: Display Clean Executive Dashboard
+      ansible.builtin.debug:
+        msg: |
+          =========================================================================
+                        DISA STIG FINAL AUDIT REPORT: {{ inventory_hostname }}
+          =========================================================================
+          RHEL Version           : {{ ansible_distribution_version }}
+          Audit Date             : {{ ansible_date_time.iso8601 }}
+
+          -------------------------------------------------------------------------
+                                 SYSTEM OPERATIONAL STATUS
+          -------------------------------------------------------------------------
+          Status                 : {% if system_is_operable %}✅ OPERATIONAL{% else %}❌ CRITICAL FAILURES DETECTED{% endif %}
+          {% if operational_failures | length > 0 %}
+          Failures               :
+          {% for failure in operational_failures %}
+                                   ❌ {{ failure }}
+          {% endfor %}
+          {% endif %}
+
+          -------------------------------------------------------------------------
+                                    COMPLIANCE OVERVIEW
+          -------------------------------------------------------------------------
+          Compliance Score       : {{ compliance_score.stdout }}% ({{ compliance_level }})
+          Production Ready       : {% if production_ready %}✅ YES{% else %}❌ NO{% endif %}
+
+          Total Checked          : {{ failures_data.pass_count + failures_data.fail_count }}
+          Rules Passed           : {{ failures_data.pass_count }}
+          Rules Failed           : {{ failures_data.fail_count }}
+
+          -------------------------------------------------------------------------
+                               FAILURE BREAKDOWN BY SEVERITY
+          -------------------------------------------------------------------------
+          CAT I (High)           : {{ failures_data.cat1 | length }} critical findings
+          CAT II (Medium)        : {{ failures_data.cat2 | length }} findings
+          CAT III (Low)          : {{ failures_data.cat3 | length }} findings
+
+          {% if failures_data.cat1 | length > 0 %}
+          -------------------------------------------------------------------------
+                                CAT I FAILURES (MUST FIX)
+          -------------------------------------------------------------------------
+          {% for item in failures_data.cat1 %}
+          {{ loop.index }}. [STIG: {{ item.stig_id | default('N/A') }}] {{ item.title }}
+             Rule: {{ item.id }}
+          {% endfor %}
+          {% endif %}
+
+          {% if failures_data.cat2 | length > 0 %}
+          -------------------------------------------------------------------------
+                         CAT II FAILURES (Showing first 20 of {{ failures_data.cat2 | length }})
+          -------------------------------------------------------------------------
+          {% for item in (failures_data.cat2 | default([]))[:20] %}
+          {{ loop.index }}. [STIG: {{ item.stig_id | default('N/A') }}] {{ item.title }}
+             Rule: {{ item.id }}
+          {% endfor %}
+          {% if failures_data.cat2 | length > 20 %}
+          ... and {{ failures_data.cat2 | length - 20 }} more CAT II findings.
+          {% endif %}
+          {% endif %}
+
+          {% if failures_data.cat3 | length > 0 %}
+          -------------------------------------------------------------------------
+                         CAT III FAILURES (Showing first 10 of {{ failures_data.cat3 | length }})
+          -------------------------------------------------------------------------
+          {% for item in (failures_data.cat3 | default([]))[:10] %}
+          {{ loop.index }}. [STIG: {{ item.stig_id | default('N/A') }}] {{ item.title }}
+             Rule: {{ item.id }}
+          {% endfor %}
+          {% if failures_data.cat3 | length > 10 %}
+          ... and {{ failures_data.cat3 | length - 10 }} more CAT III findings.
+          {% endif %}
+          {% endif %}
+
+          -------------------------------------------------------------------------
+                                      RECOMMENDATIONS
+          -------------------------------------------------------------------------
+          {% if production_ready %}
+          ✅ System meets DISA STIG requirements for production use.
+          {% else %}
+          ❌ System is not ready for production. Remediate the findings above and rerun the audit.
+          {% endif %}

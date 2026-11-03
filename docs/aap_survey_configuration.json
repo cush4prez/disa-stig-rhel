@@ -1,0 +1,54 @@
+{
+  "name": "DISA STIG Configuration Survey",
+  "description": "Configure STIG audit and remediation options",
+  "spec": [
+    {
+      "question_name": "STIG Audit Mode",
+      "question_description": "Select whether to audit ALL STIG rules or only specific rules",
+      "required": true,
+      "type": "multiplechoice",
+      "variable": "stig_audit_mode",
+      "min": null,
+      "max": null,
+      "default": "full",
+      "choices": "full\nselective",
+      "new_question": true
+    },
+    {
+      "question_name": "STIG Rules to Audit",
+      "question_description": "Enter comma-separated list of STIG rule IDs (e.g., sysctl_crypto_fips_enabled,audit_rules_login_events). Only used if 'selective' mode is chosen. Leave blank for full audit.",
+      "required": false,
+      "type": "textarea",
+      "variable": "stig_rules_input",
+      "min": 0,
+      "max": 4096,
+      "default": "",
+      "choices": "",
+      "new_question": true
+    },
+    {
+      "question_name": "Apply Remediations",
+      "question_description": "Should remediations be applied automatically?",
+      "required": true,
+      "type": "multiplechoice",
+      "variable": "rhel_stig_with_rollback_apply_remediations",
+      "min": null,
+      "max": null,
+      "default": "true",
+      "choices": "true\nfalse",
+      "new_question": true
+    },
+    {
+      "question_name": "Auto Rollback on Failure",
+      "question_description": "Automatically rollback changes if operational verification fails?",
+      "required": true,
+      "type": "multiplechoice",
+      "variable": "rhel_stig_with_rollback_auto_rollback_on_failure",
+      "min": null,
+      "max": null,
+      "default": "true",
+      "choices": "true\nfalse",
+      "new_question": true
+    }
+  ]
+}

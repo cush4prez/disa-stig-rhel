@@ -1,0 +1,322 @@
+---
+# Diagnostic playbook to understand why post-hardening score is only 54%
+# This checks if remediation is actually working
+
+- name: Diagnose STIG Score Issue
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    stig_work_dir: "/opt/stig_work"
+    stig_audit_dir: "/opt/stig_audit"
+    stig_profile_id: "xccdf_org.ssgproject.content_profile_stig"
+    scap_ds_path: "/usr/share/xml/scap/ssg/content/ssg-rhel{{ ansible_distribution_major_version }}-ds.xml"
+
+  tasks:
+    - name: Display system info
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================"
+          - "STIG SCORE DIAGNOSTIC"
+          - "========================================================================"
+          - "Hostname: {{ inventory_hostname }}"
+          - "RHEL Version: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "SCAP File: {{ scap_ds_path }}"
+          - "Profile: {{ stig_profile_id }}"
+          - "------------------------------------------------------------------------"
+
+    - name: Check latest baseline scan
+      ansible.builtin.find:
+        paths: "{{ stig_audit_dir }}"
+        patterns: "baseline_*.xml"
+      register: baseline_scans
+
+    - name: Check latest post-hardening scan
+      ansible.builtin.find:
+        paths: "{{ stig_audit_dir }}"
+        patterns: "post_hardening_*.xml"
+      register: post_scans
+
+    - name: Get most recent baseline scan
+      ansible.builtin.set_fact:
+        latest_baseline: "{{ (baseline_scans.files | sort(attribute='mtime') | last).path }}"
+      when: baseline_scans.matched > 0
+
+    - name: Get most recent post-hardening scan
+      ansible.builtin.set_fact:
+        latest_post: "{{ (post_scans.files | sort(attribute='mtime') | last).path }}"
+      when: post_scans.matched > 0
+
+    - name: Check for parse script
+      ansible.builtin.stat:
+        path: "{{ stig_work_dir }}/parse_oscap_score.py"
+      register: parse_script
+
+    - name: Display scan files found
+      ansible.builtin.debug:
+        msg:
+          - "Baseline scans found: {{ baseline_scans.matched }}"
+          - "Post-hardening scans found: {{ post_scans.matched }}"
+          - "Latest baseline: {{ latest_baseline | default('None') }}"
+          - "Latest post: {{ latest_post | default('None') }}"
+          - "Parse script exists: {{ parse_script.stat.exists }}"
+
+    - name: Parse baseline score
+      ansible.builtin.command: "python3 {{ stig_work_dir }}/parse_oscap_score.py {{ latest_baseline }}"
+      register: baseline_score
+      when: latest_baseline is defined and parse_script.stat.exists
+      changed_when: false
+
+    - name: Parse post-hardening score
+      ansible.builtin.command: "python3 {{ stig_work_dir }}/parse_oscap_score.py {{ latest_post }}"
+      register: post_score
+      when: latest_post is defined and parse_script.stat.exists
+      changed_when: false
+
+    - name: Count rules in baseline XML
+      ansible.builtin.shell: |
+        echo "Pass: $(grep -c 'result>pass<' {{ latest_baseline }})"
+        echo "Fail: $(grep -c 'result>fail<' {{ latest_baseline }})"
+        echo "NotApplicable: $(grep -c 'result>notapplicable<' {{ latest_baseline }})"
+        echo "NotChecked: $(grep -c 'result>notchecked<' {{ latest_baseline }})"
+      register: baseline_counts
+      when: latest_baseline is defined
+      changed_when: false
+
+    - name: Count rules in post-hardening XML
+      ansible.builtin.shell: |
+        echo "Pass: $(grep -c 'result>pass<' {{ latest_post }})"
+        echo "Fail: $(grep -c 'result>fail<' {{ latest_post }})"
+        echo "NotApplicable: $(grep -c 'result>notapplicable<' {{ latest_post }})"
+        echo "NotChecked: $(grep -c 'result>notchecked<' {{ latest_post }})"
+      register: post_counts
+      when: latest_post is defined
+      changed_when: false
+
+    - name: Check latest remediation script
+      ansible.builtin.find:
+        paths: "{{ stig_work_dir }}"
+        patterns: "remediation_*.sh"
+      register: remediation_scripts
+
+    - name: Get most recent remediation script
+      ansible.builtin.set_fact:
+        latest_remediation: "{{ (remediation_scripts.files | sort(attribute='mtime') | last).path }}"
+      when: remediation_scripts.matched > 0
+
+    - name: Get remediation script size
+      ansible.builtin.stat:
+        path: "{{ latest_remediation }}"
+      register: remediation_stat
+      when: latest_remediation is defined
+
+    - name: Count fixes in remediation script
+      ansible.builtin.shell: |
+        set -o pipefail
+        echo "Total lines: $(wc -l < {{ latest_remediation }})"
+        echo "Fix functions: $(grep -c '^fix_' {{ latest_remediation }} || echo 0)"
+        echo "Function calls: $(grep -c '^fix_' {{ latest_remediation }} | tail -100 || echo 0)"
+      register: remediation_content
+      when: latest_remediation is defined
+      changed_when: false
+
+    - name: Check remediation log
+      ansible.builtin.find:
+        paths: "{{ stig_work_dir }}"
+        patterns: "remediation_*.log"
+      register: remediation_logs
+
+    - name: Get most recent remediation log
+      ansible.builtin.set_fact:
+        latest_log: "{{ (remediation_logs.files | sort(attribute='mtime') | last).path }}"
+      when: remediation_logs.matched > 0
+
+    - name: Read remediation log exit code
+      ansible.builtin.shell: |
+        set -o pipefail
+        head -20 {{ latest_log }} | grep 'EXIT CODE'
+      register: remediation_exit_code
+      when: latest_log is defined
+      changed_when: false
+      failed_when: false
+
+    - name: Display diagnostic results
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================"
+          - "DIAGNOSTIC RESULTS"
+          - "========================================================================"
+          - ""
+          - "BASELINE SCAN:"
+          - "  File: {{ latest_baseline | default('NOT FOUND') }}"
+          - "  Score: {{ baseline_score.stdout | default('N/A') }}%"
+          - "  Rule Counts:"
+          - "{{ baseline_counts.stdout_lines | default(['  N/A']) | join('\n') }}"
+          - ""
+          - "POST-HARDENING SCAN:"
+          - "  File: {{ latest_post | default('NOT FOUND') }}"
+          - "  Score: {{ post_score.stdout | default('N/A') }}%"
+          - "  Rule Counts:"
+          - "{{ post_counts.stdout_lines | default(['  N/A']) | join('\n') }}"
+          - ""
+          - "REMEDIATION SCRIPT:"
+          - "  File: {{ latest_remediation | default('NOT FOUND') }}"
+          - "  Size: {{ remediation_stat.stat.size | default('N/A') }} bytes"
+          - "  Content:"
+          - "{{ remediation_content.stdout_lines | default(['  N/A']) | join('\n') }}"
+          - ""
+          - "REMEDIATION EXECUTION:"
+          - "  Log: {{ latest_log | default('NOT FOUND') }}"
+          - "  {{ remediation_exit_code.stdout | default('EXIT CODE: UNKNOWN') }}"
+          - ""
+          - "========================================================================"
+
+    - name: Display analysis - scores identical (NO EFFECT)
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================"
+          - "ANALYSIS:"
+          - "========================================================================"
+          - ""
+          - "❌ PROBLEM: Baseline and post-hardening scores are IDENTICAL ({{ baseline_score.stdout | default('N/A') }}%)"
+          - "   This means remediation had NO EFFECT."
+          - ""
+          - "   Possible causes:"
+          - "   1. Remediation script is empty or malformed"
+          - "   2. Remediation script failed to execute"
+          - "   3. System was already at this compliance level"
+          - "   4. SCAP profile mismatch between scan and remediation"
+          - ""
+          - "========================================================================"
+      when: baseline_score.stdout | default('0') | float == post_score.stdout | default('0') | float
+
+    - name: Display analysis - scores changed (WORKING)
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================"
+          - "ANALYSIS:"
+          - "========================================================================"
+          - ""
+          - "✓ Remediation changed compliance:"
+          - "   Baseline: {{ baseline_score.stdout | default('N/A') }}%"
+          - "   Post: {{ post_score.stdout | default('N/A') }}%"
+          - "   Change: {{ (post_score.stdout | default('0') | float - baseline_score.stdout | default('0') | float) | round(2) }}%"
+          - ""
+          - "========================================================================"
+      when: baseline_score.stdout | default('0') | float != post_score.stdout | default('0') | float
+
+    - name: Display warning - script too small
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================"
+          - "WARNING: REMEDIATION SCRIPT ISSUE"
+          - "========================================================================"
+          - ""
+          - "❌ PROBLEM: Remediation script is suspiciously small ({{ remediation_stat.stat.size | default(0) }} bytes)"
+          - "   A proper RHEL STIG remediation script should be 200KB-500KB"
+          - ""
+          - "========================================================================"
+      when: remediation_stat.stat.size | default(0) < 10000
+
+    - name: Show first 50 lines of remediation script for manual review
+      ansible.builtin.command: "head -50 {{ latest_remediation }}"
+      register: remediation_preview
+      when: latest_remediation is defined
+      changed_when: false
+
+    - name: Display remediation script preview
+      ansible.builtin.debug:
+        msg:
+          - "REMEDIATION SCRIPT PREVIEW (first 50 lines):"
+          - "------------------------------------------------------------------------"
+          - "{{ remediation_preview.stdout }}"
+          - "------------------------------------------------------------------------"
+      when: latest_remediation is defined
+
+    - name: Show tail of remediation script
+      ansible.builtin.command: "tail -100 {{ latest_remediation }} | grep '^fix_'"
+      register: remediation_functions
+      when: latest_remediation is defined
+      changed_when: false
+      failed_when: false
+
+    - name: Display fix functions being called
+      ansible.builtin.debug:
+        msg:
+          - "FIX FUNCTIONS IN REMEDIATION SCRIPT:"
+          - "------------------------------------------------------------------------"
+          - "{{ remediation_functions.stdout }}"
+          - "------------------------------------------------------------------------"
+      when: latest_remediation is defined and remediation_functions.stdout | length > 0
+
+    - name: Test generating a fresh remediation script right now
+      ansible.builtin.command: >
+        oscap xccdf generate fix
+        --fix-type bash
+        --profile {{ stig_profile_id }}
+        --output "{{ stig_work_dir }}/diagnostic_remediation_test.sh"
+        "{{ scap_ds_path }}"
+      register: test_generate
+      changed_when: false
+
+    - name: Check test script size
+      ansible.builtin.stat:
+        path: "{{ stig_work_dir }}/diagnostic_remediation_test.sh"
+      register: test_script_stat
+
+    - name: Display test generation results
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================"
+          - "TEST REMEDIATION GENERATION (RIGHT NOW):"
+          - "========================================================================"
+          - "Command exit code: {{ test_generate.rc }}"
+          - "Script generated: {{ test_script_stat.stat.exists }}"
+          - "Script size: {{ test_script_stat.stat.size }} bytes"
+          - "========================================================================"
+
+    - name: Display warning - test script too small
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================"
+          - "TEST SCRIPT WARNING"
+          - "========================================================================"
+          - ""
+          - "❌ PROBLEM: Test script is too small ({{ test_script_stat.stat.size }} bytes)"
+          - "   Expected: 200,000 - 500,000 bytes for RHEL STIG"
+          - "   This indicates the SCAP profile or data stream may be wrong"
+          - ""
+          - "========================================================================"
+      when: test_script_stat.stat.size < 10000
+
+    - name: Display success - test script normal size
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================"
+          - "TEST SCRIPT STATUS"
+          - "========================================================================"
+          - ""
+          - "✓ Test script size looks normal ({{ test_script_stat.stat.size }} bytes)"
+          - ""
+          - "========================================================================"
+      when: test_script_stat.stat.size >= 10000
+
+    - name: Check what SCAP profiles are available
+      ansible.builtin.shell: "set -o pipefail && oscap info {{ scap_ds_path }} | grep -i profile | head -20"
+      register: available_profiles
+      changed_when: false
+
+    - name: Display available profiles
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================"
+          - "AVAILABLE SCAP PROFILES:"
+          - "========================================================================"
+          - "{{ available_profiles.stdout }}"
+          - "========================================================================"
+          - ""
+          - "Currently using: {{ stig_profile_id }}"
+          - ""
+          - "If the profile doesn't match, remediation will be empty/wrong!"
+          - "========================================================================"

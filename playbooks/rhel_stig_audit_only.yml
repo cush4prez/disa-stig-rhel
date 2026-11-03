@@ -1,0 +1,92 @@
+---
+- name: RHEL DISA STIG Audit Only (NO REMEDIATIONS)
+  hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Display audit-only notice
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================="
+          - "       RHEL {{ ansible_distribution_major_version }} DISA STIG AUDIT ONLY"
+          - "========================================================================="
+          - "Target Host        : {{ inventory_hostname }}"
+          - "RHEL Version       : {{ ansible_distribution_version }}"
+          - "Mode               : AUDIT ONLY - NO CHANGES WILL BE MADE"
+          - "========================================================================"
+
+    - name: Verify SCAP content exists
+      ansible.builtin.stat:
+        path: "{{ scap_ds_path }}"
+      register: scap_stat
+
+    - name: Install SCAP content if missing
+      ansible.builtin.dnf:
+        name:
+          - openscap-scanner
+          - scap-security-guide
+        state: present
+      when: not scap_stat.stat.exists
+
+    - name: Create STIG audit directory
+      ansible.builtin.file:
+        path: "{{ stig_audit_dir }}"
+        state: directory
+        mode: '0750'
+
+    - name: Run STIG audit
+      ansible.builtin.command: >
+        oscap xccdf eval
+        --profile {{ stig_profile_id }}
+        --results {{ stig_audit_dir }}/audit_{{ backup_timestamp }}.xml
+        --results-arf {{ stig_audit_dir }}/audit_{{ backup_timestamp }}-arf.xml
+        --report {{ stig_audit_dir }}/audit_{{ backup_timestamp }}.html
+        {{ scap_ds_path }}
+      register: audit_scan
+      failed_when: false
+      changed_when: false
+
+    - name: Create work directory
+      ansible.builtin.file:
+        path: "{{ stig_work_dir }}"
+        state: directory
+        mode: '0750'
+
+    - name: Copy parse script to work directory
+      ansible.builtin.copy:
+        content: "{{ lookup('file', playbook_dir ~ '/../files/parse_oscap_score.py') }}"
+        dest: "{{ stig_work_dir }}/parse_oscap_score.py"
+        mode: '0755'
+
+    - name: Parse audit results
+      ansible.builtin.command: "{{ stig_work_dir }}/parse_oscap_score.py {{ stig_audit_dir }}/audit_{{ backup_timestamp }}.xml"
+      register: audit_score
+      changed_when: false
+      failed_when: false
+
+    - name: Display audit results
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================="
+          - "            RHEL {{ ansible_distribution_major_version }} DISA STIG AUDIT COMPLETE"
+          - "========================================================================="
+          - "Target Host            : {{ inventory_hostname }}"
+          - "RHEL Version           : {{ ansible_distribution_version }}"
+          - "STIG Compliance        : {{ audit_score.stdout | default('Unknown') }}%"
+          - "-------------------------------------------------------------------------"
+          - "Audit Report           : {{ stig_audit_dir }}/audit_{{ backup_timestamp }}.html"
+          - "Audit Results XML      : {{ stig_audit_dir }}/audit_{{ backup_timestamp }}.xml"
+          - "========================================================================"
+          - ""
+          - "NO CHANGES WERE MADE TO THE SYSTEM"
+          - ""
+          - "To view detailed results:"
+          - "  firefox {{ stig_audit_dir }}/audit_{{ backup_timestamp }}.html"
+          - ""
+          - "To generate remediation script (review before running):"
+          - "  oscap xccdf generate fix --fix-type bash \\"
+          - "    --result-id '' \\"
+          - "    {{ stig_audit_dir }}/audit_{{ backup_timestamp }}.xml \\"
+          - "    > /tmp/remediation_review.sh"
+          - "========================================================================="

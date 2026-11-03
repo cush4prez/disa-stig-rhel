@@ -1,0 +1,9 @@
+---
+- name: Emergency Rollback
+  hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Include rollback tasks
+      ansible.builtin.include_tasks: ../roles/rhel_stig_with_rollback/tasks/rollback.yml

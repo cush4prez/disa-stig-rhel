@@ -1,0 +1,276 @@
+---
+# Emergency rollback tasks
+# This file performs an emergency rollback when hardening fails
+
+- name: Set default failure info if not provided
+  ansible.builtin.set_fact:
+    rhel_stig_with_rollback_failure_reason: "{{ rhel_stig_with_rollback_failure_reason | default('Unknown failure') }}"
+    rhel_stig_with_rollback_failure_type: "{{ rhel_stig_with_rollback_failure_type | default('unknown') }}"
+    rhel_stig_with_rollback_failure_log_location: "{{ rhel_stig_with_rollback_failure_log_location | default('Not available') }}"
+    rhel_stig_with_rollback_failure_details: "{{ rhel_stig_with_rollback_failure_details | default('') }}"
+    rhel_stig_with_rollback_failure_exit_code: "{{ rhel_stig_with_rollback_failure_exit_code | default('N/A') }}"
+
+- name: Display rollback initiation message
+  ansible.builtin.debug:
+    msg:
+      - "========================================================================="
+      - "                    ⚠️  INITIATING EMERGENCY ROLLBACK ⚠️"
+      - "========================================================================="
+      - "Hardening has failed critical validation checks."
+      - ""
+      - "FAILURE INFORMATION:"
+      - "  Reason         : {{ rhel_stig_with_rollback_failure_reason }}"
+      - "  Type           : {{ rhel_stig_with_rollback_failure_type }}"
+      - "{% if rhel_stig_with_rollback_failure_exit_code != 'N/A' %}  Exit Code      : {{ rhel_stig_with_rollback_failure_exit_code }}{% endif %}"
+      - "{% if rhel_stig_with_rollback_failure_details %}  Details        : {{ rhel_stig_with_rollback_failure_details }}{% endif %}"
+      - "  Log Location   : {{ rhel_stig_with_rollback_failure_log_location }}"
+      - ""
+      - "Reverting changes from backup: {{ rhel_stig_with_rollback_backup_archive }}"
+      - "========================================================================="
+
+- name: Create temporary rollback directory
+  ansible.builtin.tempfile:
+    state: directory
+    suffix: _emergency_rollback
+  register: rhel_stig_with_rollback_temp
+
+- name: Extract backup archive for rollback
+  ansible.builtin.unarchive:
+    src: "{{ rhel_stig_with_rollback_backup_archive }}"
+    dest: "{{ rhel_stig_with_rollback_temp.path }}"
+    remote_src: true
+
+- name: Find extracted backup directory
+  ansible.builtin.find:
+    paths: "{{ rhel_stig_with_rollback_temp.path }}"
+    patterns: "backup_*"
+    file_type: directory
+  register: rhel_stig_with_rollback_backup_dir_found
+
+- name: Set rollback source path
+  ansible.builtin.set_fact:
+    rhel_stig_with_rollback_source: "{{ rhel_stig_with_rollback_backup_dir_found.files[0].path }}/config_files"
+
+- name: Check if SSH config backup exists
+  ansible.builtin.stat:
+    path: "{{ rhel_stig_with_rollback_source }}/etc/ssh/sshd_config"
+  register: rhel_stig_with_rollback_ssh_config_backup
+
+- name: Restore critical SSH configuration
+  ansible.builtin.copy:
+    src: "{{ rhel_stig_with_rollback_source }}/etc/ssh/sshd_config"
+    dest: /etc/ssh/sshd_config
+    remote_src: true
+    mode: preserve
+  when: rhel_stig_with_rollback_ssh_config_backup.stat.exists
+
+- name: Check if PAM config backup exists
+  ansible.builtin.stat:
+    path: "{{ rhel_stig_with_rollback_source }}/etc/pam.d"
+  register: rhel_stig_with_rollback_pam_config_backup
+
+- name: Restore PAM configuration
+  ansible.posix.synchronize:
+    src: "{{ rhel_stig_with_rollback_source }}/etc/pam.d/"
+    dest: /etc/pam.d/
+    archive: true
+  delegate_to: "{{ inventory_hostname }}"
+  when: rhel_stig_with_rollback_pam_config_backup.stat.exists
+
+- name: Check if sudoers backup exists
+  ansible.builtin.stat:
+    path: "{{ rhel_stig_with_rollback_source }}/etc/sudoers"
+  register: rhel_stig_with_rollback_sudoers_backup
+
+- name: Restore sudoers configuration
+  ansible.builtin.copy:
+    src: "{{ rhel_stig_with_rollback_source }}/etc/sudoers"
+    dest: /etc/sudoers
+    remote_src: true
+    mode: preserve
+  when: rhel_stig_with_rollback_sudoers_backup.stat.exists
+
+- name: Check if login.defs backup exists
+  ansible.builtin.stat:
+    path: "{{ rhel_stig_with_rollback_source }}/etc/login.defs"
+  register: rhel_stig_with_rollback_login_defs_backup
+
+- name: Restore login.defs
+  ansible.builtin.copy:
+    src: "{{ rhel_stig_with_rollback_source }}/etc/login.defs"
+    dest: /etc/login.defs
+    remote_src: true
+    mode: preserve
+  when: rhel_stig_with_rollback_login_defs_backup.stat.exists
+
+- name: Restart SSH daemon
+  ansible.builtin.systemd:
+    name: sshd
+    state: restarted
+  failed_when: false
+
+- name: Restore critical services
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: started
+  loop: "{{ rhel_stig_with_rollback_critical_services }}"
+  failed_when: false
+
+- name: Clean up rollback temporary directory
+  ansible.builtin.file:
+    path: "{{ rollback_temp.path }}"
+    state: absent
+
+- name: Display rollback completion message
+  ansible.builtin.debug:
+    msg:
+      - "========================================================================="
+      - "                    EMERGENCY ROLLBACK COMPLETED"
+      - "========================================================================="
+      - "Critical configurations have been restored from backup."
+      - ""
+      - "VERIFY SYSTEM ACCESS:"
+      - "  1. Test SSH connectivity"
+      - "  2. Verify critical services are running"
+      - "  3. Check system logs for errors"
+      - ""
+      - "For full system restore, use:"
+      - "  ansible-playbook playbooks/perform_rollback.yml -e rhel_stig_with_rollback_backup_name={{ rhel_stig_with_rollback_backup_name }}"
+      - "========================================================================="
+
+- name: Create failure summary file
+  ansible.builtin.copy:
+    dest: "{{ rhel_stig_with_rollback_stig_audit_dir | default('/opt/stig_audit') }}/ROLLBACK_FAILURE_SUMMARY.txt"
+    mode: '0644'
+    content: |
+      ========================================================================
+                          STIG HARDENING FAILURE SUMMARY
+      ========================================================================
+
+      Timestamp: {{ ansible_date_time.iso8601 }}
+      Hostname: {{ ansible_hostname }}
+
+      FAILURE DETAILS:
+      ----------------
+      Reason:         {{ failure_reason }}
+      Type:           {{ failure_type }}
+      {% if failure_exit_code != 'N/A' %}Exit Code:      {{ failure_exit_code }}{% endif %}
+      {% if failure_details %}Details:        {{ failure_details }}{% endif %}
+
+      LOG LOCATIONS:
+      --------------
+      Primary Log:    {{ failure_log_location }}
+      Backup Archive: {{ rhel_stig_with_rollback_backup_archive | default('Not available') }}
+      Audit Directory: {{ rhel_stig_with_rollback_stig_audit_dir | default('/opt/stig_audit') }}
+
+      TROUBLESHOOTING STEPS:
+      ----------------------
+      {% if failure_type == 'remediation' or failure_type == 'remediation_exception' %}
+      1. Review the remediation log:
+         cat {{ failure_log_location }}
+
+      2. Check for specific STIG rule failures:
+         grep -i "error\|fail" {{ failure_log_location }}
+
+      3. Review baseline audit results:
+         firefox {{ rhel_stig_with_rollback_stig_audit_dir }}/baseline_*.html
+
+      4. Check if SCAP Security Guide is installed:
+         rpm -qa | grep scap-security-guide
+
+      5. Verify OpenSCAP scanner is available:
+         which oscap
+      {% elif failure_type == 'service_failure' %}
+      1. Check the status of failed services:
+         {% for service in failed_services | default([]) %}systemctl status {{ service }}
+         {% endfor %}
+
+      2. View service logs:
+         {% for service in failed_services | default([]) %}journalctl -u {{ service }} -n 50
+         {% endfor %}
+
+      3. Review system logs:
+         tail -100 /var/log/messages
+
+      4. Check if STIG hardening broke service configs:
+         diff {{ rhel_stig_with_rollback_backup_archive | default('backup') }}/config_files/etc /etc
+      {% else %}
+      1. Review all logs in the audit directory:
+         ls -lt {{ rhel_stig_with_rollback_stig_audit_dir }}
+
+      2. Check system logs:
+         tail -100 /var/log/messages
+
+      3. Review ansible output for errors
+      {% endif %}
+
+      NEXT STEPS:
+      -----------
+      1. Fix the identified issues
+      2. Re-run the hardening playbook:
+         ansible-playbook -i inventory playbooks/site.yml
+
+      3. Or run in audit-only mode to identify issues:
+         ansible-playbook -i inventory playbooks/site.yml \
+           -e rhel_stig_with_rollback_apply_remediations=false
+
+      ROLLBACK INFORMATION:
+      ---------------------
+      Your system has been restored to its pre-hardening state.
+      Backup location: {{ rhel_stig_with_rollback_backup_archive | default('Not available') }}
+
+      ========================================================================
+
+- name: Fail the playbook after rollback
+  ansible.builtin.fail:
+    msg: |
+      ========================================================================
+                      STIG HARDENING FAILED - ROLLED BACK
+      ========================================================================
+
+      Failure Reason: {{ failure_reason }}
+
+      {% if failure_type == 'remediation' or failure_type == 'remediation_exception' %}
+      The remediation script encountered errors during execution.
+
+      TO DIAGNOSE:
+      ------------
+      1. Review the remediation log:
+         cat {{ failure_log_location }}
+
+      2. Check the failure summary:
+         cat {{ rhel_stig_with_rollback_stig_audit_dir | default('/opt/stig_audit') }}/ROLLBACK_FAILURE_SUMMARY.txt
+
+      3. Review baseline audit:
+         firefox {{ rhel_stig_with_rollback_stig_audit_dir | default('/opt/stig_audit') }}/baseline_*.html
+
+      {% elif failure_type == 'service_failure' %}
+      Critical services failed to start after hardening.
+
+      FAILED SERVICES:
+      ----------------
+      {{ failure_details }}
+
+      TO DIAGNOSE:
+      ------------
+      1. Check service status:
+         {% for service in failed_services | default([]) %}systemctl status {{ service }}
+         {% endfor %}
+
+      2. View the failure summary:
+         cat {{ rhel_stig_with_rollback_stig_audit_dir | default('/opt/stig_audit') }}/ROLLBACK_FAILURE_SUMMARY.txt
+
+      {% else %}
+      An unexpected error occurred during STIG hardening.
+
+      TO DIAGNOSE:
+      ------------
+      1. View the failure summary:
+         cat {{ rhel_stig_with_rollback_stig_audit_dir | default('/opt/stig_audit') }}/ROLLBACK_FAILURE_SUMMARY.txt
+
+      2. Review all logs:
+         ls -lt {{ rhel_stig_with_rollback_stig_audit_dir | default('/opt/stig_audit') }}
+      {% endif %}
+
+      Your system has been safely restored from backup.
+      ========================================================================

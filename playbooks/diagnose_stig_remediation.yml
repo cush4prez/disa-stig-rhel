@@ -1,0 +1,206 @@
+---
+- name: Diagnose STIG Remediation Issues
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    test_timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
+    stig_profile_id: "xccdf_org.ssgproject.content_profile_stig"
+    scap_ds_path: "/usr/share/xml/scap/ssg/content/ssg-rhel{{ ansible_distribution_major_version }}-ds.xml"
+    test_dir: "/tmp/stig_diagnostic_{{ test_timestamp }}"
+
+  tasks:
+    - name: Display system information
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================="
+          - "STIG Remediation Diagnostic"
+          - "========================================================================="
+          - "Hostname: {{ ansible_hostname }}"
+          - "RHEL Version: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "SCAP DS Path: {{ scap_ds_path }}"
+          - "Profile ID: {{ stig_profile_id }}"
+          - "========================================================================="
+
+    - name: Check if SCAP content exists
+      ansible.builtin.stat:
+        path: "{{ scap_ds_path }}"
+      register: scap_check
+
+    - name: Display SCAP content status
+      ansible.builtin.debug:
+        msg: "SCAP content exists: {{ scap_check.stat.exists }}"
+
+    - name: List available profiles
+      ansible.builtin.command: >
+        oscap info "{{ scap_ds_path }}"
+      register: oscap_info
+      failed_when: false
+      changed_when: false
+
+    - name: Display available profiles
+      ansible.builtin.debug:
+        var: oscap_info.stdout_lines
+
+    - name: Create test directory
+      ansible.builtin.file:
+        path: "{{ test_dir }}"
+        state: directory
+        mode: '0750'
+
+    - name: Run test STIG scan
+      ansible.builtin.command: >
+        oscap xccdf eval
+        --profile {{ stig_profile_id }}
+        --results "{{ test_dir }}/test_results.xml"
+        --results-arf "{{ test_dir }}/test_results_arf.xml"
+        --report "{{ test_dir }}/test_report.html"
+        "{{ scap_ds_path }}"
+      register: test_scan
+      failed_when: false
+      changed_when: false
+
+    - name: Display scan exit code
+      ansible.builtin.debug:
+        msg: "Scan exit code: {{ test_scan.rc }} (2 is normal for non-compliant systems)"
+
+    - name: Check if results file was created
+      ansible.builtin.stat:
+        path: "{{ test_dir }}/test_results.xml"
+      register: results_check
+
+    - name: Display results file status
+      ansible.builtin.debug:
+        msg:
+          - "Results file exists: {{ results_check.stat.exists }}"
+          - "Results file size: {{ results_check.stat.size | default(0) }} bytes"
+
+    - name: Generate remediation script from data stream (CORRECT METHOD)
+      ansible.builtin.command: >
+        oscap xccdf generate fix
+        --fix-type bash
+        --profile {{ stig_profile_id }}
+        --output "{{ test_dir }}/remediation_from_datastream.sh"
+        "{{ scap_ds_path }}"
+      register: gen_fix_datastream
+      failed_when: false
+      changed_when: false
+
+    - name: Display generate fix output (from data stream)
+      ansible.builtin.debug:
+        msg:
+          - "Method: Generate from DATA STREAM (correct)"
+          - "Exit code: {{ gen_fix_datastream.rc }}"
+          - "Stdout: {{ gen_fix_datastream.stdout }}"
+          - "Stderr: {{ gen_fix_datastream.stderr }}"
+
+    - name: Generate remediation script from results XML (OLD METHOD)
+      ansible.builtin.command: >
+        oscap xccdf generate fix
+        --fix-type bash
+        --profile {{ stig_profile_id }}
+        --output "{{ test_dir }}/remediation_from_results.sh"
+        "{{ test_dir }}/test_results.xml"
+      register: gen_fix_results
+      failed_when: false
+      changed_when: false
+
+    - name: Display generate fix output (from results - for comparison)
+      ansible.builtin.debug:
+        msg:
+          - "Method: Generate from RESULTS XML (old - may not work)"
+          - "Exit code: {{ gen_fix_results.rc }}"
+          - "Stdout: {{ gen_fix_results.stdout }}"
+          - "Stderr: {{ gen_fix_results.stderr }}"
+
+    - name: Check remediation script size (data stream method)
+      ansible.builtin.stat:
+        path: "{{ test_dir }}/remediation_from_datastream.sh"
+      register: remediation_check_ds
+
+    - name: Check remediation script size (results XML method)
+      ansible.builtin.stat:
+        path: "{{ test_dir }}/remediation_from_results.sh"
+      register: remediation_check_results
+
+    - name: Display remediation script comparison
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================="
+          - "REMEDIATION SCRIPT COMPARISON"
+          - "========================================================================="
+          - "Data Stream Method:"
+          - "  - Exists: {{ remediation_check_ds.stat.exists }}"
+          - "  - Size: {{ remediation_check_ds.stat.size | default(0) }} bytes"
+          - ""
+          - "Results XML Method:"
+          - "  - Exists: {{ remediation_check_results.stat.exists }}"
+          - "  - Size: {{ remediation_check_results.stat.size | default(0) }} bytes"
+          - "========================================================================="
+
+    - name: Show first 50 lines of data stream remediation script
+      ansible.builtin.command: head -50 "{{ test_dir }}/remediation_from_datastream.sh"
+      register: script_preview_ds
+      failed_when: false
+      when: remediation_check_ds.stat.exists
+
+    - name: Display data stream script preview
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================="
+          - "REMEDIATION SCRIPT PREVIEW (Data Stream Method)"
+          - "========================================================================="
+          - "{{ script_preview_ds.stdout_lines }}"
+      when: remediation_check_ds.stat.exists
+
+    - name: Count remediation functions in data stream script
+      ansible.builtin.shell: grep -c "^function " "{{ test_dir }}/remediation_from_datastream.sh" || echo "0"
+      register: function_count_ds
+      failed_when: false
+      changed_when: false
+      when: remediation_check_ds.stat.exists
+
+    - name: Count remediation functions in results XML script
+      ansible.builtin.shell: grep -c "^function " "{{ test_dir }}/remediation_from_results.sh" || echo "0"
+      register: function_count_results
+      failed_when: false
+      changed_when: false
+      when: remediation_check_results.stat.exists
+
+    - name: Display diagnostic summary
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================="
+          - "DIAGNOSTIC SUMMARY"
+          - "========================================================================="
+          - "SCAP Content: {{ 'FOUND' if scap_check.stat.exists else 'MISSING' }}"
+          - "Scan Completed: {{ 'YES' if test_scan.rc in [0, 2] else 'NO' }}"
+          - "Results Generated: {{ 'YES' if results_check.stat.exists else 'NO' }}"
+          - ""
+          - "REMEDIATION GENERATION RESULTS:"
+          - "  Data Stream Method (CORRECT):"
+          - "    - Generated: {{ 'YES' if remediation_check_ds.stat.exists else 'NO' }}"
+          - "    - Size: {{ remediation_check_ds.stat.size | default(0) }} bytes"
+          - "    - Functions: {{ function_count_ds.stdout | default('N/A') }}"
+          - ""
+          - "  Results XML Method (OLD):"
+          - "    - Generated: {{ 'YES' if remediation_check_results.stat.exists else 'NO' }}"
+          - "    - Size: {{ remediation_check_results.stat.size | default(0) }} bytes"
+          - "    - Functions: {{ function_count_results.stdout | default('N/A') }}"
+          - ""
+          - "CONCLUSION:"
+          - "  {% if remediation_check_ds.stat.exists and remediation_check_ds.stat.size > 1000 %}"
+          - "  ✓ Data stream method works - this is the CORRECT approach"
+          - "  {% else %}"
+          - "  ✗ Data stream method failed - check SCAP profile compatibility"
+          - "  {% endif %}"
+          - "========================================================================="
+          - ""
+          - "Test files location: {{ test_dir }}"
+          - ""
+          - "Next steps:"
+          - "  1. Review {{ test_dir }}/test_report.html"
+          - "  2. Compare remediation_from_datastream.sh vs remediation_from_results.sh"
+          - "  3. If data stream script is good, the role should now work correctly"
+          - "========================================================================="

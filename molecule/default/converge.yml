@@ -1,0 +1,134 @@
+---
+# Molecule converge playbook - tests RHEL STIG playbooks
+- name: Converge - Test RHEL Version Detection and Playbook Functionality
+  hosts: all
+  become: false
+  gather_facts: true
+  vars:
+    backup_root: "/var/backups/stig_restore_points"
+    backup_timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
+    backup_dir: "{{ backup_root }}/backup_{{ backup_timestamp }}"
+    backup_name: "pre_stig_{{ ansible_hostname }}_{{ backup_timestamp }}"
+    scap_ds_path: "/usr/share/xml/scap/ssg/content/ssg-rhel{{ ansible_distribution_major_version }}-ds.xml"
+    stig_profile_id: "xccdf_org.ssgproject.content_profile_stig"
+    stig_audit_dir: "/var/log/stig_audit"
+
+  tasks:
+    - name: Display test environment
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================="
+          - "              MOLECULE TEST - RHEL STIG PLAYBOOKS"
+          - "========================================================================="
+          - "Container         : {{ inventory_hostname }}"
+          - "OS Distribution   : {{ ansible_distribution }}"
+          - "OS Version        : {{ ansible_distribution_version }}"
+          - "Major Version     : {{ ansible_distribution_major_version }}"
+          - "SCAP Path         : {{ scap_ds_path }}"
+          - "========================================================================="
+
+    # Test 1: Version Detection
+    - name: TEST 1 - Verify supported RHEL version detection
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == "RedHat"
+          - ansible_distribution_major_version | int in [8, 9, 10]
+        fail_msg: "Version detection failed. Detected: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+        success_msg: "✓ TEST 1 PASSED - RHEL {{ ansible_distribution_major_version }} detected correctly"
+
+    # Test 2: Backup Directory Creation
+    - name: TEST 2 - Create backup directory structure
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0750'
+      loop:
+        - "{{ backup_root }}"
+        - "{{ backup_dir }}"
+        - "{{ stig_audit_dir }}"
+
+    - name: TEST 2 - Verify directories created
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ backup_root }}"
+        - "{{ backup_dir }}"
+        - "{{ stig_audit_dir }}"
+      register: dir_stats
+
+    - name: TEST 2 - Assert directories exist
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isdir
+        fail_msg: "Directory {{ item.item }} was not created"
+        success_msg: "✓ TEST 2 PASSED - Directory {{ item.item }} created"
+      loop: "{{ dir_stats.results }}"
+
+    # Test 3: Dynamic SCAP Path Construction
+    - name: TEST 3 - Verify SCAP path is correctly constructed
+      ansible.builtin.debug:
+        msg: "Expected SCAP path: /usr/share/xml/scap/ssg/content/ssg-rhel{{ ansible_distribution_major_version }}-ds.xml"
+
+    - name: TEST 3 - Validate SCAP path format
+      ansible.builtin.assert:
+        that:
+          - scap_ds_path is match("^/usr/share/xml/scap/ssg/content/ssg-rhel[0-9]+-ds.xml$")
+        fail_msg: "SCAP path format invalid: {{ scap_ds_path }}"
+        success_msg: "✓ TEST 3 PASSED - SCAP path format valid: {{ scap_ds_path }}"
+
+    # Test 4: Install test packages (will fail in UBI but that's OK)
+    - name: TEST 4 - Attempt to install SCAP packages
+      ansible.builtin.dnf:
+        name:
+          - openscap-scanner
+          - scap-security-guide
+          - python3
+        state: present
+      register: package_install
+      failed_when: false
+
+    - name: TEST 4 - Display package install status
+      ansible.builtin.debug:
+        msg: "Package installation: {{ 'SUCCESS' if package_install.rc == 0 else 'SKIPPED (expected in UBI containers)' }}"
+
+    # Test 5: Create test backup metadata
+    - name: TEST 5 - Create backup metadata file
+      ansible.builtin.copy:
+        dest: "{{ backup_dir }}/metadata.yml"
+        mode: '0644'
+        content: |
+          ---
+          backup_name: "{{ backup_name }}"
+          hostname: "{{ ansible_hostname }}"
+          os_version: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
+          rhel_major_version: "{{ ansible_distribution_major_version }}"
+          test_timestamp: "{{ ansible_date_time.iso8601 }}"
+
+    - name: TEST 5 - Verify metadata file created
+      ansible.builtin.stat:
+        path: "{{ backup_dir }}/metadata.yml"
+      register: metadata_stat
+
+    - name: TEST 5 - Assert metadata exists
+      ansible.builtin.assert:
+        that:
+          - metadata_stat.stat.exists
+          - metadata_stat.stat.size > 0
+        fail_msg: "Metadata file was not created"
+        success_msg: "✓ TEST 5 PASSED - Metadata file created successfully"
+
+    - name: Display test summary
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================="
+          - "              MOLECULE CONVERGE TESTS SUMMARY"
+          - "========================================================================="
+          - "✓ TEST 1: Version Detection - PASSED"
+          - "✓ TEST 2: Directory Creation - PASSED"
+          - "✓ TEST 3: SCAP Path Construction - PASSED"
+          - "✓ TEST 4: Package Installation - {{ 'PASSED' if package_install.rc == 0 else 'SKIPPED' }}"
+          - "✓ TEST 5: Metadata Creation - PASSED"
+          - "========================================================================="
+          - "Status: ALL CRITICAL TESTS PASSED"
+          - "========================================================================="

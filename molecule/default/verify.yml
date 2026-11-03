@@ -1,0 +1,95 @@
+---
+# Molecule verify playbook - validates STIG playbook functionality
+- name: Verify
+  hosts: all
+  become: false
+  gather_facts: true
+  tasks:
+    - name: Verify RHEL version was detected correctly
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == "RedHat"
+          - ansible_distribution_major_version is defined
+          - ansible_distribution_major_version | int >= 8
+        fail_msg: "RHEL version detection failed"
+        success_msg: "✓ RHEL {{ ansible_distribution_major_version }} detected correctly"
+
+    - name: Verify backup directory was created
+      ansible.builtin.stat:
+        path: /var/backups/stig_restore_points
+      register: backup_dir
+
+    - name: Assert backup directory exists
+      ansible.builtin.assert:
+        that:
+          - backup_dir.stat.exists
+          - backup_dir.stat.isdir
+        fail_msg: "Backup directory was not created"
+        success_msg: "✓ Backup directory created successfully"
+
+    - name: Check for backup archives
+      ansible.builtin.find:
+        paths: /var/backups/stig_restore_points
+        patterns: "pre_stig_*.tar.gz"
+      register: backup_files
+
+    - name: Assert at least one backup was created
+      ansible.builtin.assert:
+        that:
+          - backup_files.matched > 0
+        fail_msg: "No backup archives found"
+        success_msg: "✓ {{ backup_files.matched }} backup archive(s) created"
+
+    - name: Verify STIG audit directory was created
+      ansible.builtin.stat:
+        path: /var/log/stig_audit
+      register: audit_dir
+
+    - name: Assert audit directory exists
+      ansible.builtin.assert:
+        that:
+          - audit_dir.stat.exists
+          - audit_dir.stat.isdir
+        fail_msg: "STIG audit directory was not created"
+        success_msg: "✓ STIG audit directory created successfully"
+
+    - name: Verify SCAP Security Guide is accessible
+      ansible.builtin.stat:
+        path: "/usr/share/xml/scap/ssg/content/ssg-rhel{{ ansible_distribution_major_version }}-ds.xml"
+      register: scap_content
+
+    - name: Display SCAP content availability
+      ansible.builtin.debug:
+        msg: "SCAP content for RHEL {{ ansible_distribution_major_version }}: {{ 'Available ✓' if scap_content.stat.exists else 'Not Available (expected in UBI containers)' }}"
+
+    - name: Verify system state backup components exist
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /var/backups/stig_restore_points
+        - /var/log/stig_audit
+      register: required_dirs
+
+    - name: Assert all required directories exist
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+        fail_msg: "Required directory {{ item.item }} not found"
+        success_msg: "✓ Directory {{ item.item }} exists"
+      loop: "{{ required_dirs.results }}"
+
+    - name: Display verification summary
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================="
+          - "              MOLECULE VERIFICATION RESULTS"
+          - "========================================================================="
+          - "Host                : {{ inventory_hostname }}"
+          - "RHEL Version        : {{ ansible_distribution_version }}"
+          - "Major Version       : {{ ansible_distribution_major_version }}"
+          - "Backup Archives     : {{ backup_files.matched }}"
+          - "Audit Directory     : Created"
+          - "SCAP Content        : {{ 'Available' if scap_content.stat.exists else 'N/A (UBI)' }}"
+          - "========================================================================="
+          - "Status              : ✓ ALL TESTS PASSED"
+          - "========================================================================="

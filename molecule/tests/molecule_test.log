@@ -1,0 +1,25 @@
+WARNING  Driver podman does not provide a schema.
+WARNING  Driver podman does not provide a schema.
+INFO     [default > discovery] scenario test matrix: dependency, cleanup, destroy, syntax, create, prepare, converge, idempotence, side_effect, verify, cleanup, destroy
+INFO     [default > prerun] Performing prerun with role_name_check=0...
+WARNING  Another version of 'ansible.posix' 2.2.1 was found installed in /usr/share/ansible/collections/ansible_collections, only the first one will be used, 2.2.0 (/usr/lib/python3.14/site-packages/ansible_collections).
+WARNING  Another version of 'community.general' 12.6.0 was found installed in /usr/share/ansible/collections/ansible_collections, only the first one will be used, 12.6.2 (/usr/lib/python3.14/site-packages/ansible_collections).
+INFO     [default > dependency] Executing
+WARNING  [default > dependency] Missing roles requirements file: requirements.yml
+WARNING  [default > dependency] Missing collections requirements file: collections.yml
+WARNING  [default > dependency] Executed: 2 missing (Remove from test_sequence to suppress)
+INFO     [default > cleanup] Executing
+WARNING  [default > cleanup] Executed: Missing playbook (Remove from test_sequence to suppress)
+INFO     [default > destroy] Executing
+WARNING  [default > destroy] Skipping, '--destroy=never' requested.
+INFO     [default > destroy] Executed: Successful
+INFO     [default > syntax] Executing
+INFO     Sanity checks: 'podman'
+
+playbook: /home/rcushman/Projects/rhel8-disa-stig/molecule/default/converge.yml
+INFO     [default > syntax] Executed: Successful
+INFO     [default > create] Executing
+[ERROR]: The 'community.general.yaml' callback plugin has been removed. The plugin has been superseded by the option `result_format=yaml` in callback plugin ansible.builtin.default from ansible-core 2.13 onwards. This feature was removed from collection 'community.general' version 12.0.0.
+CRITICAL Ansible return code was 1, command was: ansible-playbook --inventory /home/rcushman/.ansible/tmp/molecule.Q2rV.default/inventory --skip-tags molecule-notest,notest /usr/local/lib/python3.14/site-packages/molecule_plugins/podman/playbooks/create.yml
+ERROR    [default > create] [31mExecuted: Failed[0m
+ERROR    Ansible return code was 1, command was: ansible-playbook --inventory /home/rcushman/.ansible/tmp/molecule.Q2rV.default/inventory --skip-tags molecule-notest,notest /usr/local/lib/python3.14/site-packages/molecule_plugins/podman/playbooks/create.yml

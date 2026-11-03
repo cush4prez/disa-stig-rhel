@@ -1,0 +1,123 @@
+---
+# Phase 6: Final summary and rollback instructions
+
+- name: Display hardening summary
+  ansible.builtin.debug:
+    msg:
+      - "========================================================================="
+      - "            RHEL {{ ansible_distribution_major_version }} DISA STIG HARDENING COMPLETE"
+      - "========================================================================="
+      - "Target Host            : {{ inventory_hostname }}"
+      - "RHEL Version           : {{ ansible_distribution_version }}"
+      - "Baseline Compliance    : {{ rhel_stig_with_rollback_baseline_score.stdout }}%"
+      - >-
+        {% if rhel_stig_with_rollback_apply_remediations %}
+        Post-Hardening Compliance : {{ rhel_stig_with_rollback_post_score.stdout }}%{% endif %}
+      - >-
+        {% if rhel_stig_with_rollback_apply_remediations %}
+        Compliance Improvement : +{{ (rhel_stig_with_rollback_post_score.stdout | float -
+        rhel_stig_with_rollback_baseline_score.stdout | float) | round(2) }}%{% endif %}
+      - "-------------------------------------------------------------------------"
+      - "Backup Archive         : {{ rhel_stig_with_rollback_backup_archive | default('Not created') }}"
+      - >-
+        Baseline Report        :
+        {{ rhel_stig_with_rollback_stig_audit_dir }}/baseline_{{ rhel_stig_with_rollback_backup_timestamp }}.html
+      - >-
+        {% if rhel_stig_with_rollback_apply_remediations %}Post-Hardening Report   :
+        {{ rhel_stig_with_rollback_stig_audit_dir }}/post_hardening_{{ rhel_stig_with_rollback_backup_timestamp }}.html{% endif %}
+      - >-
+        {% if rhel_stig_with_rollback_apply_remediations %}Remediation Log        :
+        {{ rhel_stig_with_rollback_stig_work_dir }}/remediation_{{ rhel_stig_with_rollback_backup_timestamp }}.log{% endif %}
+      - "========================================================================"
+      - ""
+      - "{% if rhel_stig_with_rollback_enable_auto_backup %}✓ ROLLBACK CAPABILITY ENABLED{% endif %}"
+      - ""
+      - "  ansible-playbook -i inventory playbooks/perform_rollback.yml \\"
+      - "    -e rhel_stig_with_rollback_backup_name={{ rhel_stig_with_rollback_backup_name }}"
+      - ""
+      - "Or restore manually:"
+      - ""
+      - "  cd {{ rhel_stig_with_rollback_backup_root }}"
+      - "  tar -xzf {{ rhel_stig_with_rollback_backup_name }}.tar.gz"
+      - "  # Review and selectively restore files from backup_{{ rhel_stig_with_rollback_backup_timestamp }}/"
+      - "========================================================================"
+
+- name: Create rollback instructions file
+  ansible.builtin.copy:
+    dest: "{{ rhel_stig_with_rollback_backup_root }}/ROLLBACK_INSTRUCTIONS.txt"
+    mode: '0644'
+    content: |
+      ========================================================================
+                    STIG HARDENING ROLLBACK INSTRUCTIONS
+      ========================================================================
+
+      Hardening Date: {{ ansible_date_time.iso8601 }}
+      Hostname: {{ ansible_hostname }}
+      Backup Archive: {{ rhel_stig_with_rollback_backup_archive }}
+
+      ------------------------------------------------------------------------
+      AUTOMATED ROLLBACK (RECOMMENDED)
+      ------------------------------------------------------------------------
+
+      1. Using the rollback playbook:
+
+         ansible-playbook -i inventory playbooks/perform_rollback.yml \
+           -e rhel_stig_with_rollback_backup_name={{ rhel_stig_with_rollback_backup_name }}
+
+      2. The rollback playbook will:
+         - Restore configuration files
+         - Revert security settings
+         - Restore service states
+         - Reset firewall rules
+         - Restore kernel parameters
+
+      ------------------------------------------------------------------------
+      MANUAL SELECTIVE ROLLBACK
+      ------------------------------------------------------------------------
+
+      1. Extract the backup:
+         cd {{ rhel_stig_with_rollback_backup_root }}
+         tar -xzf {{ rhel_stig_with_rollback_backup_name }}.tar.gz
+
+      2. Selectively restore components:
+
+         # Restore SSH configuration (if locked out)
+         cp backup_{{ rhel_stig_with_rollback_backup_timestamp }}/config_files/etc/ssh/sshd_config /etc/ssh/
+         systemctl restart sshd
+
+         # Restore PAM configuration
+         cp -r backup_{{ rhel_stig_with_rollback_backup_timestamp }}/config_files/etc/pam.d/* /etc/pam.d/
+
+         # Restore sudoers
+         cp backup_{{ rhel_stig_with_rollback_backup_timestamp }}/config_files/etc/sudoers /etc/
+
+         # Restore firewall rules
+         iptables-restore < backup_{{ rhel_stig_with_rollback_backup_timestamp }}/security_state/iptables_rules.txt
+
+         # Restore sysctl parameters
+         cp backup_{{ rhel_stig_with_rollback_backup_timestamp }}/config_files/etc/sysctl.conf /etc/
+         sysctl -p
+
+      ------------------------------------------------------------------------
+      CRITICAL SERVICES TO VERIFY AFTER ROLLBACK
+      ------------------------------------------------------------------------
+
+      systemctl status sshd
+      systemctl status NetworkManager
+      systemctl status auditd
+      systemctl status firewalld
+
+      ------------------------------------------------------------------------
+      EMERGENCY RECOVERY
+      ------------------------------------------------------------------------
+
+      If you cannot SSH after hardening:
+
+      1. Access via console (physical, IPMI, or cloud console)
+      2. Run the automated rollback command above
+      3. Or manually restore SSH config:
+         cp {{ rhel_stig_with_rollback_backup_root }}/backup_{{ rhel_stig_with_rollback_backup_timestamp }}/config_files/etc/ssh/sshd_config /etc/ssh/
+         systemctl restart sshd
+
+      ========================================================================
+  when: rhel_stig_with_rollback_enable_auto_backup

@@ -1,0 +1,8 @@
+---
+- name: Apply RHEL DISA STIG Hardening with Rollback Protection
+  hosts: all
+  become: true
+  gather_facts: true
+
+  roles:
+    - rhel_stig_with_rollback

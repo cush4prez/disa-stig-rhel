@@ -1,0 +1,25 @@
+---
+# Ansible-lint configuration for RHEL STIG project
+
+skip_list:
+  - yaml[indentation]  # Allow 2-space indentation for tasks (common style)
+
+warn_list:
+  - experimental  # Warn about experimental features
+  - no-changed-when  # Warn about missing changed_when
+
+# Use relaxed rules for task files (not full playbooks)
+kinds:
+  - tasks: "**/tasks/**/*.yml"
+  - tasks: "**/playbooks/verify_*.yml"  # Task files in playbooks dir
+  - playbook: "**/playbooks/*_playbook.yml"
+  - playbook: "**/playbooks/*_with_*.yml"
+
+# Exclude certain paths
+exclude_paths:
+  - .cache/
+  - .git/
+  - molecule/
+
+# Enable offline mode (don't download roles/collections)
+offline: true

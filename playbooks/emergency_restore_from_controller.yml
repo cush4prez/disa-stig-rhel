@@ -1,0 +1,183 @@
+---
+- name: Emergency Restore from AAP Controller Backup
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars_prompt:
+    - name: backup_file_name
+      prompt: "Enter backup filename (from controller)"
+      private: false
+
+  tasks:
+    - name: Display restoration notice
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================="
+          - "               ⚠️  EMERGENCY SYSTEM RESTORATION ⚠️"
+          - "========================================================================="
+          - "This will restore system configuration from AAP controller backup."
+          - "Target Host        : {{ inventory_hostname }}"
+          - "Backup Source      : {{ rhel_stig_with_rollback_controller_backup_dir }}/{{ inventory_hostname }}/{{ backup_file_name }}"
+          - ""
+          - "WARNING: This will OVERWRITE current system configuration!"
+          - "========================================================================="
+
+    - name: Create temporary restoration directory
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: _emergency_restore
+      register: rhel_stig_with_rollback_restore_temp
+
+    - name: Push backup from controller to managed node
+      ansible.builtin.copy:
+        src: "{{ rhel_stig_with_rollback_controller_backup_dir }}/{{ inventory_hostname }}/{{ backup_file_name }}"
+        dest: "{{ rhel_stig_with_rollback_restore_temp.path }}/backup.tar.gz"
+        mode: '0600'
+
+    - name: Extract backup archive
+      ansible.builtin.unarchive:
+        src: "{{ rhel_stig_with_rollback_restore_temp.path }}/backup.tar.gz"
+        dest: "{{ rhel_stig_with_rollback_restore_temp.path }}"
+        remote_src: true
+
+    - name: Find extracted backup directory
+      ansible.builtin.find:
+        paths: "{{ rhel_stig_with_rollback_restore_temp.path }}"
+        patterns: "backup_*"
+        file_type: directory
+      register: rhel_stig_with_rollback_backup_dir_found
+
+    - name: Set restoration source path
+      ansible.builtin.set_fact:
+        rhel_stig_with_rollback_restore_source: "{{ rhel_stig_with_rollback_backup_dir_found.files[0].path }}/config_files"
+
+    - name: Display restoration source
+      ansible.builtin.debug:
+        msg: "Restoring from: {{ rhel_stig_with_rollback_restore_source }}"
+
+    - name: Check if SSH config backup exists
+      ansible.builtin.stat:
+        path: "{{ rhel_stig_with_rollback_restore_source }}/etc/ssh/sshd_config"
+      register: rhel_stig_with_rollback_ssh_config_backup
+
+    - name: Restore SSH configuration
+      ansible.builtin.copy:
+        src: "{{ rhel_stig_with_rollback_restore_source }}/etc/ssh/sshd_config"
+        dest: /etc/ssh/sshd_config
+        remote_src: true
+        mode: preserve
+      when: rhel_stig_with_rollback_ssh_config_backup.stat.exists
+
+    - name: Check if PAM config backup exists
+      ansible.builtin.stat:
+        path: "{{ rhel_stig_with_rollback_restore_source }}/etc/pam.d"
+      register: rhel_stig_with_rollback_pam_config_backup
+
+    - name: Restore PAM configuration
+      ansible.posix.synchronize:
+        src: "{{ rhel_stig_with_rollback_restore_source }}/etc/pam.d/"
+        dest: /etc/pam.d/
+        archive: true
+      delegate_to: "{{ inventory_hostname }}"
+      when: rhel_stig_with_rollback_pam_config_backup.stat.exists
+
+    - name: Check if sudoers backup exists
+      ansible.builtin.stat:
+        path: "{{ rhel_stig_with_rollback_restore_source }}/etc/sudoers"
+      register: rhel_stig_with_rollback_sudoers_backup
+
+    - name: Restore sudoers configuration
+      ansible.builtin.copy:
+        src: "{{ rhel_stig_with_rollback_restore_source }}/etc/sudoers"
+        dest: /etc/sudoers
+        remote_src: true
+        mode: preserve
+      when: rhel_stig_with_rollback_sudoers_backup.stat.exists
+
+    - name: Check if passwd backup exists
+      ansible.builtin.stat:
+        path: "{{ rhel_stig_with_rollback_restore_source }}/etc/passwd"
+      register: rhel_stig_with_rollback_passwd_backup
+
+    - name: Restore passwd file
+      ansible.builtin.copy:
+        src: "{{ rhel_stig_with_rollback_restore_source }}/etc/passwd"
+        dest: /etc/passwd
+        remote_src: true
+        mode: preserve
+      when: rhel_stig_with_rollback_passwd_backup.stat.exists
+
+    - name: Check if shadow backup exists
+      ansible.builtin.stat:
+        path: "{{ rhel_stig_with_rollback_restore_source }}/etc/shadow"
+      register: rhel_stig_with_rollback_shadow_backup
+
+    - name: Restore shadow file
+      ansible.builtin.copy:
+        src: "{{ rhel_stig_with_rollback_restore_source }}/etc/shadow"
+        dest: /etc/shadow
+        remote_src: true
+        mode: preserve
+      when: rhel_stig_with_rollback_shadow_backup.stat.exists
+
+    - name: Check if group backup exists
+      ansible.builtin.stat:
+        path: "{{ rhel_stig_with_rollback_restore_source }}/etc/group"
+      register: rhel_stig_with_rollback_group_backup
+
+    - name: Restore group file
+      ansible.builtin.copy:
+        src: "{{ rhel_stig_with_rollback_restore_source }}/etc/group"
+        dest: /etc/group
+        remote_src: true
+        mode: preserve
+      when: rhel_stig_with_rollback_group_backup.stat.exists
+
+    - name: Check if login.defs backup exists
+      ansible.builtin.stat:
+        path: "{{ rhel_stig_with_rollback_restore_source }}/etc/login.defs"
+      register: rhel_stig_with_rollback_login_defs_backup
+
+    - name: Restore login.defs
+      ansible.builtin.copy:
+        src: "{{ rhel_stig_with_rollback_restore_source }}/etc/login.defs"
+        dest: /etc/login.defs
+        remote_src: true
+        mode: preserve
+      when: rhel_stig_with_rollback_login_defs_backup.stat.exists
+
+    - name: Restart SSH daemon
+      ansible.builtin.systemd:
+        name: sshd
+        state: restarted
+      failed_when: false
+
+    - name: Restore critical services
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: started
+      loop: "{{ rhel_stig_with_rollback_critical_services }}"
+      failed_when: false
+
+    - name: Clean up temporary restoration directory
+      ansible.builtin.file:
+        path: "{{ rhel_stig_with_rollback_restore_temp.path }}"
+        state: absent
+
+    - name: Display restoration completion
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================="
+          - "               EMERGENCY RESTORATION COMPLETED"
+          - "========================================================================="
+          - "Critical system configurations have been restored from controller backup."
+          - ""
+          - "NEXT STEPS:"
+          - "  1. Test SSH connectivity: ssh {{ ansible_user }}@{{ inventory_hostname }}"
+          - "  2. Verify critical services: systemctl status sshd"
+          - "  3. Check system logs: journalctl -xe"
+          - "  4. Verify user authentication works"
+          - ""
+          - "If system is still unstable, you may need console access for full restore."
+          - "========================================================================="

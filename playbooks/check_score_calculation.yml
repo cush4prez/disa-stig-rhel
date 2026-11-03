@@ -1,0 +1,29 @@
+---
+# Quick playbook to check how scores are being calculated
+# Run this AFTER running rhel_stig_with_rollback.yml
+
+- name: Check Score Calculation Method
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Copy analysis script
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../check_xml_on_remote.sh"
+        dest: /tmp/check_xml_on_remote.sh
+        mode: '0755'
+
+    - name: Run analysis script
+      ansible.builtin.command: /tmp/check_xml_on_remote.sh
+      register: analysis_output
+      changed_when: false
+
+    - name: Display analysis results
+      ansible.builtin.debug:
+        msg: "{{ analysis_output.stdout_lines }}"
+
+    - name: Clean up
+      ansible.builtin.file:
+        path: /tmp/check_xml_on_remote.sh
+        state: absent

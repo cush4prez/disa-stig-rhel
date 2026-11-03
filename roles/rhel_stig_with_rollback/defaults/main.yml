@@ -1,0 +1,36 @@
+---
+# rhel_stig_with_rollback role default variables
+# All variables prefixed with rhel_stig_with_rollback_ per Ansible best practices
+
+# Backup configuration
+rhel_stig_with_rollback_enable_auto_backup: true
+rhel_stig_with_rollback_backup_root: "/opt/stig_backups"
+rhel_stig_with_rollback_backup_timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
+rhel_stig_with_rollback_backup_name: "pre_stig_{{ ansible_hostname }}_{{ rhel_stig_with_rollback_backup_timestamp }}"
+
+# Controller backup configuration (disaster recovery)
+rhel_stig_with_rollback_fetch_to_controller: true
+rhel_stig_with_rollback_controller_backup_dir: "/var/lib/awx/projects/stig_backups"
+
+# STIG configuration
+rhel_stig_with_rollback_scap_ds_path: "/usr/share/xml/scap/ssg/content/ssg-rhel{{ ansible_distribution_major_version }}-ds.xml"
+rhel_stig_with_rollback_stig_profile_id: "xccdf_org.ssgproject.content_profile_stig"
+rhel_stig_with_rollback_stig_audit_dir: "/opt/stig_audit"
+rhel_stig_with_rollback_stig_work_dir: "/opt/stig_work"
+
+# Remediation control
+rhel_stig_with_rollback_apply_remediations: true
+rhel_stig_with_rollback_require_confirmation: true
+
+# Selective STIG application
+# Leave empty [] to audit/remediate ALL rules
+# Or specify list of rule IDs to audit/remediate only those
+# Example: ['sysctl_crypto_fips_enabled', 'audit_rules_login_events']
+rhel_stig_with_rollback_stig_rules_to_apply: []
+
+# Rollback configuration
+rhel_stig_with_rollback_auto_rollback_on_failure: true
+rhel_stig_with_rollback_rollback_on_critical_service_failure: true
+rhel_stig_with_rollback_critical_services:
+  - sshd
+  - NetworkManager
