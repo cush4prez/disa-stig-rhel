@@ -4,55 +4,55 @@
 - name: Verify system is still operational (not checking compliance)
   when: rhel_stig_with_rollback_apply_remediations
   block:
-    - name: Run comprehensive operational check
-      ansible.builtin.include_tasks: verify_operational.yml
+  - name: Run comprehensive operational check
+    ansible.builtin.include_tasks: verify_operational.yml
 
-    - name: Display operational verdict
-      ansible.builtin.debug:
-        msg: |
-          =========================================================================
-          {% if rhel_stig_with_rollback_system_is_operable %}
-          ✅ SYSTEM IS OPERATIONAL
+  - name: Display operational verdict
+    ansible.builtin.debug:
+      msg: |
+        =========================================================================
+        {% if rhel_stig_with_rollback_system_is_operable %}
+        ✅ SYSTEM IS OPERATIONAL
 
-          The system is functional and accessible.
-          Any remaining STIG findings are NON-CRITICAL and can be:
-            • Addressed manually
-            • Documented as exceptions
-            • Fixed in a future remediation run
+        The system is functional and accessible.
+        Any remaining STIG findings are NON-CRITICAL and can be:
+          • Addressed manually
+          • Documented as exceptions
+          • Fixed in a future remediation run
 
-          No rollback needed - hardening will continue.
-          {% else %}
-          ❌ SYSTEM IS INOPERABLE
+        No rollback needed - hardening will continue.
+        {% else %}
+        ❌ SYSTEM IS INOPERABLE
 
-          Critical failures detected:
-          {% for failure in rhel_stig_with_rollback_operational_failures %}
-            • {{ failure }}
-          {% endfor %}
+        Critical failures detected:
+        {% for failure in rhel_stig_with_rollback_operational_failures %}
+          • {{ failure }}
+        {% endfor %}
 
-          Rollback will be initiated to restore functionality.
-          {% endif %}
-          =========================================================================
+        Rollback will be initiated to restore functionality.
+        {% endif %}
+        =========================================================================
 
-    - name: Decide if rollback is needed based on operability
-      when: not rhel_stig_with_rollback_system_is_operable and rhel_stig_with_rollback_auto_rollback_on_failure
-      block:
-        - name: Set failure details for inoperable system
-          ansible.builtin.set_fact:
-            rhel_stig_with_rollback_failure_reason: "System is inoperable after STIG hardening"
-            rhel_stig_with_rollback_failure_details: "Critical failures: {{ rhel_stig_with_rollback_operational_failures | join(', ') }}"
-            rhel_stig_with_rollback_failure_log_location: >-
-              {{ rhel_stig_with_rollback_stig_work_dir }}/remediation_{{ rhel_stig_with_rollback_backup_timestamp }}.log
-            rhel_stig_with_rollback_failure_type: "system_inoperable"
+  - name: Decide if rollback is needed based on operability
+    when: not rhel_stig_with_rollback_system_is_operable and rhel_stig_with_rollback_auto_rollback_on_failure
+    block:
+      - name: Set failure details for inoperable system
+        ansible.builtin.set_fact:
+          rhel_stig_with_rollback_failure_reason: "System is inoperable after STIG hardening"
+          rhel_stig_with_rollback_failure_details: "Critical failures: {{ rhel_stig_with_rollback_operational_failures | join(', ') }}"
+          rhel_stig_with_rollback_failure_log_location: >-
+            {{ rhel_stig_with_rollback_stig_work_dir }}/remediation_{{ rhel_stig_with_rollback_backup_timestamp }}.log
+          rhel_stig_with_rollback_failure_type: "system_inoperable"
 
-        - name: Display rollback warning
-          ansible.builtin.debug:
-            msg: "⚠️  System is inoperable, initiating rollback..."
+      - name: Display rollback warning
+        ansible.builtin.debug:
+          msg: "⚠️  System is inoperable, initiating rollback..."
 
-        - name: Execute emergency rollback
-          ansible.builtin.include_tasks: rollback.yml
-          vars:
-            rollback_reason: "{{ rhel_stig_with_rollback_failure_reason }}"
-            rollback_details: "{{ rhel_stig_with_rollback_failure_details }}"
+      - name: Execute emergency rollback
+        ansible.builtin.include_tasks: rollback.yml
+        vars:
+          rollback_reason: "{{ rhel_stig_with_rollback_failure_reason }}"
+          rollback_details: "{{ rhel_stig_with_rollback_failure_details }}"
 
 - name: Run post-hardening audit
   ansible.builtin.command: >
