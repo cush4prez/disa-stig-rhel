@@ -1,0 +1,79 @@
+---
+# Global variables for all hosts
+# These can be overridden in AAP Job Templates via Extra Variables
+
+# STIG Hardening Configuration
+# =============================
+# Note: Variables for the rhel_stig_with_rollback role are prefixed
+
+# Enable/disable automatic backup before hardening
+rhel_stig_with_rollback_enable_auto_backup: true
+
+# Root directory for backups (must not have noexec)
+rhel_stig_with_rollback_backup_root: "/opt/stig_backups"
+
+# Controller backup configuration (disaster recovery)
+# CRITICAL: Backups are fetched to AAP controller for recovery from catastrophic failures
+rhel_stig_with_rollback_fetch_to_controller: true
+rhel_stig_with_rollback_controller_backup_dir: "/var/lib/awx/projects/stig_backups"
+
+# STIG audit and work directories (must not have noexec)
+rhel_stig_with_rollback_stig_audit_dir: "/opt/stig_audit"
+rhel_stig_with_rollback_stig_work_dir: "/opt/stig_work"
+
+# Apply STIG remediations (set false for audit-only mode)
+rhel_stig_with_rollback_apply_remediations: true
+
+# Rollback Configuration
+# =======================
+
+# Automatically rollback if system becomes inoperable
+rhel_stig_with_rollback_auto_rollback_on_failure: true
+
+# Rollback if critical services fail
+rhel_stig_with_rollback_rollback_on_critical_service_failure: true
+
+# Services that must remain running after hardening
+rhel_stig_with_rollback_critical_services:
+  - sshd
+  - NetworkManager
+
+rhel_stig_with_rollback_backup_archive: "{{ rhel_stig_with_rollback_backup_root }}/{{ rhel_stig_with_rollback_backup_name }}.tar.gz"
+
+# SCAP Configuration
+# ==================
+
+# STIG profile to apply
+rhel_stig_with_rollback_stig_profile_id: "xccdf_org.ssgproject.content_profile_stig"
+
+# Note: scap_ds_path is auto-detected based on RHEL version
+# It will be set to: /usr/share/xml/scap/ssg/content/ssg-rhel{8,9,10}-ds.xml
+
+# Variables for standalone playbooks (not using the role)
+# =========================================================
+# These are used by playbooks that don't use rhel_stig_with_rollback role
+
+enable_auto_backup: true
+backup_root: "/opt/stig_backups"
+backup_timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
+backup_name: "pre_stig_{{ ansible_hostname }}_{{ backup_timestamp }}"
+
+# Controller backup configuration for standalone playbooks
+fetch_to_controller: true
+controller_backup_dir: "/var/lib/awx/projects/stig_backups"
+
+scap_ds_path: "/usr/share/xml/scap/ssg/content/ssg-rhel{{ ansible_distribution_major_version }}-ds.xml"
+stig_profile_id: "xccdf_org.ssgproject.content_profile_stig"
+stig_audit_dir: "/opt/stig_audit"
+stig_work_dir: "/opt/stig_work"
+
+apply_remediations: true
+require_confirmation: true
+
+auto_rollback_on_failure: true
+rollback_on_critical_service_failure: true
+critical_services:
+  - sshd
+  - NetworkManager
+
+backup_archive: "{{ backup_root }}/{{ backup_name }}.tar.gz"

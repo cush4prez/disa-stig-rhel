@@ -1,0 +1,430 @@
+---
+- name: Backup RHEL System State Before STIG Hardening
+  hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+
+#########################################################################
+# PHASE 1: INITIALIZE BACKUP ENVIRONMENT
+#########################################################################
+
+  - name: Verify supported RHEL version
+    ansible.builtin.assert:
+      that:
+        - ansible_distribution == "RedHat"
+        - ansible_distribution_major_version | int in [8, 9, 10]
+      fail_msg: "This playbook supports RHEL 8, 9, and 10 only. Detected: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+      success_msg: "RHEL {{ ansible_distribution_major_version }} detected - proceeding with backup"
+
+  - name: Create backup directory structure
+    ansible.builtin.file:
+      path: "{{ item }}"
+      state: directory
+      mode: '0750'
+      owner: root
+      group: root
+    loop:
+      - "{{ backup_root }}"
+      - "{{ backup_dir }}"
+      - "{{ backup_dir }}/config_files"
+      - "{{ backup_dir }}/package_state"
+      - "{{ backup_dir }}/service_state"
+      - "{{ backup_dir }}/security_state"
+      - "{{ backup_dir }}/system_state"
+
+  - name: Create backup metadata file
+    ansible.builtin.copy:
+      dest: "{{ backup_dir }}/backup_metadata.yml"
+      mode: '0644'
+      content: |
+        ---
+        backup_name: "{{ backup_name }}"
+        description: "{{ backup_description }}"
+        hostname: "{{ ansible_hostname }}"
+        fqdn: "{{ ansible_fqdn }}"
+        created_date: "{{ ansible_date_time.iso8601 }}"
+        created_timestamp: "{{ backup_timestamp }}"
+        os_distribution: "{{ ansible_distribution }}"
+        os_version: "{{ ansible_distribution_version }}"
+        kernel_version: "{{ ansible_kernel }}"
+        backup_location: "{{ backup_dir }}"
+
+#########################################################################
+# PHASE 2: BACKUP CONFIGURATION FILES
+#########################################################################
+
+  - name: Identify critical configuration files to backup
+    ansible.builtin.set_fact:
+      config_files_to_backup:
+        - /etc/passwd
+        - /etc/shadow
+        - /etc/group
+        - /etc/gshadow
+        - /etc/sudoers
+        - /etc/ssh/sshd_config
+        - /etc/pam.d
+        - /etc/login.defs
+        - /etc/security/pwquality.conf
+        - /etc/security/limits.conf
+        - /etc/sysctl.conf
+        - /etc/sysctl.d
+        - /etc/audit/auditd.conf
+        - /etc/audit/rules.d
+        - /etc/audit/audit.rules
+        - /etc/rsyslog.conf
+        - /etc/rsyslog.d
+        - /etc/chrony.conf
+        - /etc/ntp.conf
+        - /etc/selinux/config
+        - /etc/fstab
+        - /etc/hosts
+        - /etc/hosts.allow
+        - /etc/hosts.deny
+        - /etc/issue
+        - /etc/issue.net
+        - /etc/motd
+        - /etc/profile
+        - /etc/bashrc
+        - /etc/csh.cshrc
+        - /etc/environment
+        - /etc/postfix/main.cf
+        - /etc/firewalld
+        - /boot/grub2/grub.cfg
+        - /boot/grub2/user.cfg
+
+  - name: Check which config files exist
+    ansible.builtin.stat:
+      path: "{{ item }}"
+    loop: "{{ config_files_to_backup }}"
+    register: config_files_check
+
+  - name: Backup configuration files
+    ansible.builtin.copy:
+      src: "{{ item.item }}"
+      dest: "{{ backup_dir }}/config_files{{ item.item }}"
+      remote_src: true
+      mode: preserve
+      force: true
+    loop: "{{ config_files_check.results }}"
+    when: item.stat.exists
+    failed_when: false
+
+#########################################################################
+# PHASE 3: BACKUP PACKAGE STATE
+#########################################################################
+
+  - name: Gather package facts
+    ansible.builtin.package_facts:
+      manager: auto
+
+  - name: Save installed packages list
+    ansible.builtin.copy:
+      dest: "{{ backup_dir }}/package_state/installed_packages.txt"
+      content: |
+        {% for pkg in ansible_facts.packages.keys() | sort %}
+        {{ pkg }}-{{ ansible_facts.packages[pkg][0].version }}-{{ ansible_facts.packages[pkg][0].release }}.{{ ansible_facts.packages[pkg][0].arch }}
+        {% endfor %}
+      mode: '0644'
+
+#########################################################################
+# PHASE 4: BACKUP SERVICE STATE
+#########################################################################
+
+  - name: Gather service facts
+    ansible.builtin.service_facts:
+
+  - name: Save all services state
+    ansible.builtin.copy:
+      dest: "{{ backup_dir }}/service_state/all_services.yml"
+      content: "{{ ansible_facts.services | to_nice_yaml }}"
+      mode: '0644'
+
+  - name: Save running services list
+    ansible.builtin.copy:
+      dest: "{{ backup_dir }}/service_state/running_services.txt"
+      content: |
+        {% for service, details in ansible_facts.services.items() %}
+        {% if details.state == 'running' %}
+        {{ service }}
+        {% endif %}
+        {% endfor %}
+      mode: '0644'
+
+  - name: Save enabled services list
+    ansible.builtin.copy:
+      dest: "{{ backup_dir }}/service_state/enabled_services.txt"
+      content: |
+        {% for service, details in ansible_facts.services.items() %}
+        {% if details.status == 'enabled' %}
+        {{ service }}
+        {% endif %}
+        {% endfor %}
+      mode: '0644'
+
+#########################################################################
+# PHASE 5: BACKUP SECURITY STATE
+#########################################################################
+
+  - name: Get SELinux enforcement status
+    ansible.builtin.command: getenforce
+    register: selinux_enforce
+    changed_when: false
+    failed_when: false
+
+  - name: Get SELinux detailed status
+    ansible.builtin.command: sestatus
+    register: selinux_status
+    changed_when: false
+    failed_when: false
+
+  - name: Save SELinux status
+    ansible.builtin.copy:
+      dest: "{{ backup_dir }}/security_state/selinux_status.txt"
+      mode: '0644'
+      content: |
+        SELinux Status:
+        {{ selinux_enforce.stdout | default('SELinux not available') }}
+
+        SELinux Config:
+        {{ selinux_status.stdout | default('') }}
+
+  - name: Get firewalld rules
+    ansible.builtin.command: firewall-cmd --list-all-zones
+    register: firewalld_rules
+    changed_when: false
+    failed_when: false
+
+  - name: Save firewalld rules
+    ansible.builtin.copy:
+      dest: "{{ backup_dir }}/security_state/firewall_rules.txt"
+      mode: '0644'
+      content: |
+        === Firewalld Status ===
+        {{ firewalld_rules.stdout | default('Firewalld not available') }}
+
+  - name: Get iptables rules
+    ansible.builtin.command: iptables-save
+    register: iptables_rules
+    changed_when: false
+    failed_when: false
+
+  - name: Save iptables rules
+    ansible.builtin.copy:
+      dest: "{{ backup_dir }}/security_state/iptables_rules.txt"
+      mode: '0644'
+      content: "{{ iptables_rules.stdout | default('') }}"
+    when: iptables_rules.rc == 0
+
+  - name: Get audit rules
+    ansible.builtin.command: auditctl -l
+    register: audit_rules
+    changed_when: false
+    failed_when: false
+
+  - name: Save audit rules
+    ansible.builtin.copy:
+      dest: "{{ backup_dir }}/security_state/audit_rules.txt"
+      mode: '0644'
+      content: "{{ audit_rules.stdout | default('Auditd not available') }}"
+
+  - name: Find critical files for permissions backup
+    ansible.builtin.find:
+      paths:
+        - /etc
+        - /usr/bin
+        - /usr/sbin
+        - /var/log
+      file_type: file
+    register: critical_files
+    failed_when: false
+
+  - name: Save file permissions for critical files
+    ansible.builtin.copy:
+      dest: "{{ backup_dir }}/security_state/file_permissions.txt"
+      mode: '0644'
+      content: |
+        {% for file in critical_files.files[:10000] %}
+        {{ file.path }}|{{ file.mode }}|{{ file.pw_name }}|{{ file.gr_name }}
+        {% endfor %}
+
+#########################################################################
+# PHASE 6: BACKUP SYSTEM STATE
+#########################################################################
+
+  - name: Get sysctl parameters
+    ansible.builtin.command: sysctl -a
+    register: sysctl_params
+    changed_when: false
+    failed_when: false
+
+  - name: Save sorted sysctl parameters
+    ansible.builtin.copy:
+      dest: "{{ backup_dir }}/system_state/sysctl_current.txt"
+      mode: '0644'
+      content: "{{ sysctl_params.stdout_lines | sort | join('\n') }}"
+    when: sysctl_params.rc == 0
+
+  - name: Get loaded kernel modules
+    ansible.builtin.command: lsmod
+    register: kernel_modules
+    changed_when: false
+
+  - name: Save sorted kernel modules
+    ansible.builtin.copy:
+      dest: "{{ backup_dir }}/system_state/loaded_modules.txt"
+      mode: '0644'
+      content: "{{ kernel_modules.stdout_lines | sort | join('\n') }}"
+
+  - name: Get mount points  # noqa: command-instead-of-module
+    ansible.builtin.command: mount
+    register: mount_points
+    changed_when: false
+
+  - name: Save mount points
+    ansible.builtin.copy:
+      dest: "{{ backup_dir }}/system_state/mount_points.txt"
+      mode: '0644'
+      content: "{{ mount_points.stdout }}"
+
+  - name: Get network interfaces
+    ansible.builtin.command: ip addr show
+    register: network_interfaces
+    changed_when: false
+
+  - name: Save network interfaces
+    ansible.builtin.copy:
+      dest: "{{ backup_dir }}/system_state/network_interfaces.txt"
+      mode: '0644'
+      content: "{{ network_interfaces.stdout }}"
+
+  - name: Get network routes
+    ansible.builtin.command: ip route show
+    register: network_routes
+    changed_when: false
+
+  - name: Save network routes
+    ansible.builtin.copy:
+      dest: "{{ backup_dir }}/system_state/network_routes.txt"
+      mode: '0644'
+      content: "{{ network_routes.stdout }}"
+
+  - name: Get user accounts
+    ansible.builtin.command: getent passwd
+    register: user_accounts
+    changed_when: false
+
+  - name: Save user accounts
+    ansible.builtin.copy:
+      dest: "{{ backup_dir }}/system_state/user_accounts.txt"
+      mode: '0644'
+      content: |
+        === Local Users ===
+        {{ user_accounts.stdout }}
+
+  - name: Get list of local users
+    ansible.builtin.command: "cut -d: -f1 /etc/passwd"
+    register: local_users
+    changed_when: false
+
+  - name: Get password aging for each user
+    ansible.builtin.command: chage -l {{ item }}
+    loop: "{{ local_users.stdout_lines }}"
+    register: password_aging
+    changed_when: false
+    failed_when: false
+
+  - name: Save password aging information
+    ansible.builtin.copy:
+      dest: "{{ backup_dir }}/system_state/password_aging.txt"
+      mode: '0644'
+      content: |
+        === Password Aging ===
+        {% for result in password_aging.results %}
+        {% if result.rc == 0 %}
+        User: {{ result.item }}
+        {{ result.stdout }}
+
+        {% endif %}
+        {% endfor %}
+
+#########################################################################
+# PHASE 7: CREATE BACKUP ARCHIVE
+#########################################################################
+
+  - name: Create compressed backup archive
+    community.general.archive:
+      path: "{{ backup_dir }}"
+      dest: "{{ backup_root }}/{{ backup_name }}.tar.gz"
+      format: gz
+      mode: '0600'
+
+  - name: Calculate backup archive checksum
+    ansible.builtin.stat:
+      path: "{{ backup_root }}/{{ backup_name }}.tar.gz"
+      checksum_algorithm: sha256
+    register: backup_archive_stat
+
+  - name: Save backup checksum
+    ansible.builtin.copy:
+      dest: "{{ backup_root }}/{{ backup_name }}.tar.gz.sha256"
+      content: "{{ backup_archive_stat.stat.checksum }}  {{ backup_name }}.tar.gz\n"
+      mode: '0644'
+
+  - name: Create backup index/catalog on remote host
+    ansible.builtin.lineinfile:
+      path: "{{ backup_root }}/backup_catalog.txt"
+      line: "{{ ansible_date_time.iso8601 }} | {{ backup_name }} | {{ ansible_hostname }} | {{ backup_archive_stat.stat.size | human_readable }}"
+      create: true
+      mode: '0644'
+
+#########################################################################
+# PHASE 8: FETCH BACKUP TO CONTROLLER (OPTIONAL)
+#########################################################################
+
+  - name: Fetch backup archive to Ansible controller
+    ansible.builtin.fetch:
+      src: "{{ backup_root }}/{{ backup_name }}.tar.gz"
+      dest: "{{ controller_backup_dir }}/{{ backup_name }}.tar.gz"
+      flat: true
+    when: fetch_to_controller
+
+  - name: Fetch backup checksum to Ansible controller
+    ansible.builtin.fetch:
+      src: "{{ backup_root }}/{{ backup_name }}.tar.gz.sha256"
+      dest: "{{ controller_backup_dir }}/{{ backup_name }}.tar.gz.sha256"
+      flat: true
+    when: fetch_to_controller
+
+#########################################################################
+# PHASE 9: DISPLAY BACKUP SUMMARY
+#########################################################################
+
+  - name: Display backup summary
+    ansible.builtin.debug:
+      msg:
+        - "========================================================================="
+        - "            RHEL {{ ansible_distribution_major_version }} STIG PRE-HARDENING BACKUP COMPLETED"
+        - "========================================================================="
+        - "Backup Name        : {{ backup_name }}"
+        - "RHEL Version       : {{ ansible_distribution_version }}"
+        - "Backup Location    : {{ backup_root }}/{{ backup_name }}.tar.gz"
+        - "Backup Size        : {{ backup_archive_stat.stat.size | human_readable }}"
+        - "SHA256 Checksum    : {{ backup_archive_stat.stat.checksum }}"
+        - "Backup Directory   : {{ backup_dir }}"
+        - "-------------------------------------------------------------------------"
+        - "Backed Up Components:"
+        - "  ✓ Configuration files (/etc)"
+        - "  ✓ Package state (RPM/DNF)"
+        - "  ✓ Service states (systemd)"
+        - "  ✓ Security settings (SELinux, firewall, audit)"
+        - "  ✓ System state (sysctl, modules, mounts)"
+        - "  ✓ User accounts and permissions"
+        - "-------------------------------------------------------------------------"
+        - "{% if fetch_to_controller %}Controller Backup : {{ controller_backup_dir }}/{{ backup_name }}.tar.gz{% endif %}"
+        - "========================================================================"
+        - ""
+        - "IMPORTANT: Keep this backup safe! You can use it to revert STIG changes."
+        - "Use the companion playbook 'rhel8_stig_revert.yml' to restore."
+        - "========================================================================="

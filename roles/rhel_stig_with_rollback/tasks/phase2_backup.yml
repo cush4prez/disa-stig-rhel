@@ -1,0 +1,107 @@
+---
+# Phase 2: Create pre-hardening backup
+
+- name: Create pre-hardening system backup
+  when: rhel_stig_with_rollback_enable_auto_backup
+  block:
+  - name: Create backup directory
+    ansible.builtin.file:
+      path: "{{ rhel_stig_with_rollback_backup_root }}/backup_{{ rhel_stig_with_rollback_backup_timestamp }}"
+      state: directory
+      mode: '0750'
+      owner: root
+      group: root
+
+  - name: Create config files backup directory
+    ansible.builtin.file:
+      path: "{{ rhel_stig_with_rollback_backup_root }}/backup_{{ rhel_stig_with_rollback_backup_timestamp }}/config_files"
+      state: directory
+      mode: '0750'
+      owner: root
+      group: root
+
+  - name: Backup critical configuration files
+    community.general.archive:
+      path:
+        - /etc/passwd
+        - /etc/shadow
+        - /etc/group
+        - /etc/sudoers
+        - /etc/ssh/sshd_config
+        - /etc/pam.d
+        - /etc/login.defs
+        - /etc/security
+        - /etc/audit
+        - /etc/sysctl.conf
+        - /etc/sysctl.d
+        - /etc/selinux
+        - /etc/firewalld
+      dest: "{{ rhel_stig_with_rollback_backup_root }}/backup_{{ rhel_stig_with_rollback_backup_timestamp }}/config_files/etc_backup.tar.gz"
+      format: gz
+      mode: '0600'
+    failed_when: false
+
+  - name: Gather service facts
+    ansible.builtin.service_facts:
+
+  - name: Save enabled services
+    ansible.builtin.copy:
+      dest: "{{ rhel_stig_with_rollback_backup_root }}/backup_{{ rhel_stig_with_rollback_backup_timestamp }}/enabled_services.txt"
+      content: |
+        {% for service, details in ansible_facts.services.items() %}
+        {% if details.status == 'enabled' %}
+        {{ service }}
+        {% endif %}
+        {% endfor %}
+      mode: '0644'
+
+  - name: Save running services
+    ansible.builtin.copy:
+      dest: "{{ rhel_stig_with_rollback_backup_root }}/backup_{{ rhel_stig_with_rollback_backup_timestamp }}/running_services.txt"
+      content: |
+        {% for service, details in ansible_facts.services.items() %}
+        {% if details.state == 'running' %}
+        {{ service }}
+        {% endif %}
+        {% endfor %}
+      mode: '0644'
+
+  - name: Create backup metadata
+    ansible.builtin.copy:
+      dest: "{{ rhel_stig_with_rollback_backup_root }}/backup_{{ rhel_stig_with_rollback_backup_timestamp }}/metadata.yml"
+      mode: '0644'
+      content: |
+        ---
+        rhel_stig_with_rollback_backup_name: "{{ rhel_stig_with_rollback_backup_name }}"
+        created: "{{ ansible_date_time.iso8601 }}"
+        hostname: "{{ ansible_hostname }}"
+        os_version: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
+        purpose: "Pre-STIG hardening backup"
+
+  - name: Create compressed backup archive
+    community.general.archive:
+      path: "{{ rhel_stig_with_rollback_backup_root }}/backup_{{ rhel_stig_with_rollback_backup_timestamp }}"
+      dest: "{{ rhel_stig_with_rollback_backup_root }}/{{ rhel_stig_with_rollback_backup_name }}.tar.gz"
+      format: gz
+      mode: '0600'
+
+  - name: Register backup location
+    ansible.builtin.set_fact:
+      rhel_stig_with_rollback_backup_archive: "{{ rhel_stig_with_rollback_backup_root }}/{{ rhel_stig_with_rollback_backup_name }}.tar.gz"
+
+  - name: Fetch backup to AAP controller for disaster recovery
+    ansible.builtin.fetch:
+      src: "{{ rhel_stig_with_rollback_backup_archive }}"
+      dest: "{{ rhel_stig_with_rollback_controller_backup_dir }}/{{ inventory_hostname }}/{{ rhel_stig_with_rollback_backup_name }}.tar.gz"
+      flat: true
+    when: rhel_stig_with_rollback_fetch_to_controller | default(true)
+
+  - name: Display backup confirmation
+    ansible.builtin.debug:
+      msg:
+        - "✓ Pre-hardening backup created: {{ rhel_stig_with_rollback_backup_archive }}"
+        - >-
+          {% if rhel_stig_with_rollback_fetch_to_controller | default(true) %}
+          ✓ Backup copied to controller:
+          {{ rhel_stig_with_rollback_controller_backup_dir }}/{{ inventory_hostname }}/
+          {% endif %}

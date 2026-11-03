@@ -1,0 +1,478 @@
+---
+# cspell:ignore STIG stig oscap xccdf scap arf
+- name: RHEL DISA STIG Hardening with Rollback Support
+  hosts: all
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    # Process AAP survey inputs
+    - name: Convert survey inputs to role variables (AAP 2.7)
+      ansible.builtin.set_fact:
+        rhel_stig_with_rollback_stig_rules_to_apply: >-
+          {% if stig_audit_mode is defined and (stig_audit_mode == 'selective') %}
+          {{ stig_rules_input.split(',') | map('trim') | select | list }}
+          {% else %}
+          []
+          {% endif %}
+      when: stig_audit_mode is defined
+
+  roles:
+    - role: rhel_stig_with_rollback
+
+  post_tasks:
+    - name: Include final summary
+      ansible.builtin.include_role:
+        name: rhel_stig_with_rollback
+        tasks_from: phase6_summary.yml
+
+#########################################################################
+# PHASE 1: PRE-HARDENING VALIDATION
+#########################################################################
+
+    - name: Verify supported RHEL version
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == "RedHat"
+          - ansible_distribution_major_version | int in [8, 9, 10]
+        fail_msg: "This playbook supports RHEL 8, 9, and 10 only. Detected: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+        success_msg: "RHEL {{ ansible_distribution_major_version }} detected - proceeding with STIG hardening"
+
+    - name: Display hardening plan
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================="
+          - "       RHEL {{ ansible_distribution_major_version }} DISA STIG HARDENING WITH NATIVE ANSIBLE FIXES"
+          - "========================================================================="
+          - "Target Host        : {{ inventory_hostname }}"
+          - "RHEL Version       : {{ ansible_distribution_version }}"
+          - "Auto Backup        : {{ 'Enabled' if enable_auto_backup else 'Disabled' }}"
+          - "Auto Rollback      : {{ 'Enabled' if auto_rollback_on_failure else 'Disabled' }}"
+          - "Backup Location    : {{ backup_root }}/{{ backup_name }}.tar.gz"
+          - "========================================================================"
+
+    - name: Verify SCAP content exists
+      ansible.builtin.stat:
+        path: "{{ scap_ds_path }}"
+      register: scap_stat
+
+    - name: Install SCAP content if missing
+      ansible.builtin.dnf:
+        name:
+          - openscap-scanner
+          - scap-security-guide
+        state: present
+      when: not scap_stat.stat.exists
+
+#########################################################################
+# PHASE 2: CREATE PRE-HARDENING BACKUP
+#########################################################################
+
+    - name: Create pre-hardening system backup
+      when: enable_auto_backup
+      block:
+        - name: Create backup directory
+          ansible.builtin.file:
+            path: "{{ backup_root }}/backup_{{ backup_timestamp }}"
+            state: directory
+            mode: '0750'
+            owner: root
+            group: root
+
+        - name: Create config files backup directory
+          ansible.builtin.file:
+            path: "{{ backup_root }}/backup_{{ backup_timestamp }}/config_files"
+            state: directory
+            mode: '0750'
+            owner: root
+            group: root
+
+        - name: Backup critical configuration files
+          community.general.archive:
+            path:
+              - /etc/passwd
+              - /etc/shadow
+              - /etc/group
+              - /etc/sudoers
+              - /etc/ssh/sshd_config
+              - /etc/pam.d
+              - /etc/login.defs
+              - /etc/security
+              - /etc/audit
+              - /etc/sysctl.conf
+              - /etc/sysctl.d
+              - /etc/selinux
+              - /etc/firewalld
+            dest: "{{ backup_root }}/backup_{{ backup_timestamp }}/config_files/etc_backup.tar.gz"
+            format: gz
+            mode: '0600'
+          failed_when: false
+
+        - name: Gather service facts
+          ansible.builtin.service_facts:
+
+        - name: Save enabled services
+          ansible.builtin.copy:
+            dest: "{{ backup_root }}/backup_{{ backup_timestamp }}/enabled_services.txt"
+            content: |
+              {% for service, details in ansible_facts.services.items() %}
+              {% if details.status == 'enabled' %}
+              {{ service }}
+              {% endif %}
+              {% endfor %}
+            mode: '0644'
+
+        - name: Save running services
+          ansible.builtin.copy:
+            dest: "{{ backup_root }}/backup_{{ backup_timestamp }}/running_services.txt"
+            content: |
+              {% for service, details in ansible_facts.services.items() %}
+              {% if details.state == 'running' %}
+              {{ service }}
+              {% endif %}
+              {% endfor %}
+            mode: '0644'
+
+        - name: Create backup metadata
+          ansible.builtin.copy:
+            dest: "{{ backup_root }}/backup_{{ backup_timestamp }}/metadata.yml"
+            mode: '0644'
+            content: |
+              ---
+              backup_name: "{{ backup_name }}"
+              created: "{{ ansible_date_time.iso8601 }}"
+              hostname: "{{ ansible_hostname }}"
+              os_version: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
+              purpose: "Pre-STIG hardening backup"
+
+        - name: Create compressed backup archive
+          community.general.archive:
+            path: "{{ backup_root }}/backup_{{ backup_timestamp }}"
+            dest: "{{ backup_root }}/{{ backup_name }}.tar.gz"
+            format: gz
+            mode: '0600'
+
+        - name: Register backup location
+          ansible.builtin.set_fact:
+            backup_archive: "{{ backup_root }}/{{ backup_name }}.tar.gz"
+
+        - name: Fetch backup to AAP controller for disaster recovery
+          ansible.builtin.fetch:
+            src: "{{ backup_archive }}"
+            dest: "{{ controller_backup_dir | default('/var/lib/awx/projects/stig_backups') }}/{{ inventory_hostname }}/{{ backup_name }}.tar.gz"
+            flat: true
+          when: fetch_to_controller | default(true)
+
+        - name: Display backup confirmation
+          ansible.builtin.debug:
+            msg:
+              - "✓ Pre-hardening backup created: {{ backup_archive }}"
+              - >-
+                {% if fetch_to_controller | default(true) %}
+                ✓ Backup copied to controller:
+                {{ controller_backup_dir | default('/var/lib/awx/projects/stig_backups') }}/{{ inventory_hostname }}/
+                {% endif %}
+
+#########################################################################
+# PHASE 3: BASELINE AUDIT
+#########################################################################
+
+    - name: Create STIG working directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0750'
+        owner: root
+        group: root
+      loop:
+        - "{{ stig_audit_dir }}"
+        - "{{ stig_work_dir }}"
+
+    - name: Run baseline STIG audit
+      ansible.builtin.command: >
+        oscap xccdf eval
+        --profile {{ stig_profile_id }}
+        --results "{{ stig_audit_dir }}/baseline_{{ backup_timestamp }}.xml"
+        --results-arf "{{ stig_audit_dir }}/baseline_{{ backup_timestamp }}-arf.xml"
+        --report "{{ stig_audit_dir }}/baseline_{{ backup_timestamp }}.html"
+        {% if stig_tailoring_file is defined and stig_tailoring_file | length > 0 %}
+        --tailoring-file "{{ stig_tailoring_file }}"
+        {% endif %}
+        "{{ scap_ds_path }}"
+      register: baseline_scan
+      failed_when: false
+      changed_when: false
+
+    - name: Check if baseline audit XML exists
+      ansible.builtin.stat:
+        path: "{{ stig_audit_dir }}/baseline_{{ backup_timestamp }}.xml"
+      register: baseline_xml_stat
+
+    - name: Copy parse script to work directory
+      ansible.builtin.copy:
+        content: "{{ lookup('file', playbook_dir ~ '/../files/parse_oscap_score.py') }}"
+        dest: "{{ stig_work_dir }}/parse_oscap_score.py"
+        mode: '0755'
+
+    - name: Parse baseline audit results
+      ansible.builtin.command: "{{ stig_work_dir }}/parse_oscap_score.py {{ stig_audit_dir }}/baseline_{{ backup_timestamp }}.xml"
+      register: baseline_score
+      changed_when: false
+      when: baseline_xml_stat.stat.exists
+
+    - name: Set default baseline score if XML not found
+      ansible.builtin.set_fact:
+        baseline_score:
+          stdout: '0.0'
+      when: not baseline_xml_stat.stat.exists
+
+    - name: Display baseline compliance score
+      ansible.builtin.debug:
+        msg: "Current STIG compliance: {{ baseline_score.stdout }}%"
+
+#########################################################################
+# PHASE 4: GENERATE AND APPLY STIG REMEDIATIONS
+#########################################################################
+
+    - name: Apply STIG hardening
+      when: apply_remediations
+      block:
+        - name: Generate STIG remediation script from SCAP data stream
+          ansible.builtin.command: >
+            oscap xccdf generate fix
+            --fix-type bash
+            --profile {{ stig_profile_id }}
+            --output "{{ stig_work_dir }}/remediation_{{ backup_timestamp }}.sh"
+            "{{ scap_ds_path }}"
+          register: generate_fix
+          changed_when: true
+
+        - name: Check remediation script was created
+          ansible.builtin.stat:
+            path: "{{ stig_work_dir }}/remediation_{{ backup_timestamp }}.sh"
+          register: remediation_script_stat
+
+        - name: Display remediation script info
+          ansible.builtin.debug:
+            msg:
+              - "Remediation script: {{ stig_work_dir }}/remediation_{{ backup_timestamp }}.sh"
+              - "Script exists: {{ remediation_script_stat.stat.exists }}"
+              - "Script size: {{ remediation_script_stat.stat.size | default(0) }} bytes"
+
+        - name: Fail if remediation script is empty or missing
+          ansible.builtin.fail:
+            msg: "Remediation script was not generated or is empty"
+          when: not remediation_script_stat.stat.exists or remediation_script_stat.stat.size | default(0) < 100
+
+        - name: Set remediation script permissions
+          ansible.builtin.file:
+            path: "{{ stig_work_dir }}/remediation_{{ backup_timestamp }}.sh"
+            mode: '0700'
+
+        - name: Execute remediation script
+          ansible.builtin.command: "{{ stig_work_dir }}/remediation_{{ backup_timestamp }}.sh"
+          args:
+            chdir: "{{ stig_work_dir }}"
+            executable: /bin/bash
+          register: remediation_result
+          failed_when: false
+          changed_when: true
+          async: 3600
+          poll: 10
+          environment:
+            PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+          ignore_unreachable: true
+
+        - name: Check if system is still reachable after remediation
+          ansible.builtin.wait_for_connection:
+            delay: 5
+            timeout: 300
+          register: reconnect_result
+          failed_when: false
+
+        - name: Handle potential reboot from remediation
+          when: reconnect_result is failed or ansible_facts is not defined
+          block:
+            - name: Wait for system to come back (may have rebooted)
+              ansible.builtin.wait_for:
+                host: "{{ ansible_host | default(inventory_hostname) }}"
+                port: 22
+                delay: 10
+                timeout: 600
+                state: started
+              delegate_to: localhost
+              become: false
+
+            - name: Wait for system to be fully ready
+              ansible.builtin.wait_for_connection:
+                delay: 15
+                timeout: 300
+
+            - name: Gather facts after reboot
+              ansible.builtin.setup:
+
+        - name: Re-register remediation result if needed
+          ansible.builtin.set_fact:
+            remediation_result: "{{ remediation_result | default({'rc': 0, 'stdout': 'Completed - system may have rebooted', 'stderr': ''}) }}"
+          when: remediation_result is not defined
+
+        - name: Save remediation log
+          ansible.builtin.copy:
+            dest: "{{ stig_work_dir }}/remediation_{{ backup_timestamp }}.log"
+            content: |
+              EXIT CODE: {{ remediation_result.rc }}
+
+              STDOUT:
+              {{ remediation_result.stdout }}
+
+              STDERR:
+              {{ remediation_result.stderr }}
+            mode: '0644'
+
+        - name: Check remediation exit code
+          ansible.builtin.set_fact:
+            remediation_failed: "{{ remediation_result.rc not in [0, 2] }}"
+
+        - name: Note remediation issues (not necessarily critical)
+          ansible.builtin.debug:
+            msg:
+              - "⚠️  Remediation script exited with code {{ remediation_result.rc }}"
+              - "This indicates some STIG rules could not be applied."
+              - "This is NORMAL and does NOT mean the system is broken."
+              - "Checking if system is still operational..."
+          when: remediation_failed | default(false)
+
+      rescue:
+        - name: Set failure details for remediation errors
+          ansible.builtin.set_fact:
+            failure_reason: "Remediation script execution error"
+            failure_log_location: "{{ stig_work_dir }}/remediation_{{ backup_timestamp }}.log"
+            failure_type: "remediation_exception"
+
+        - name: Note remediation exception
+          ansible.builtin.debug:
+            msg:
+              - "⚠️  Remediation script encountered an exception"
+              - "This does NOT automatically mean the system is broken."
+              - "The operational check will determine if rollback is needed."
+
+#########################################################################
+# PHASE 5: POST-HARDENING OPERATIONAL & SSH VERIFICATION
+#########################################################################
+
+    - name: Verify system and SSH service are still operational
+      when: apply_remediations
+      block:
+        - name: Ensure SSH daemon is running and enabled
+          ansible.builtin.systemd:
+            name: sshd
+            state: started
+            enabled: true
+
+        - name: Run comprehensive operational check script/tasks
+          ansible.builtin.include_tasks: verify_system_operational.yml
+
+        - name: Display operational verdict
+          ansible.builtin.debug:
+            msg: |
+              =========================================================================
+              {% if system_is_operable %}
+              ✅ SYSTEM IS OPERATIONAL
+
+              The system is functional, accessible, and SSH remains healthy.
+              Any remaining STIG findings are NON-CRITICAL and can be:
+                • Addressed manually or via XCCDF tailoring
+                • Documented as exceptions
+
+              No rollback needed - proceeding with final audit.
+              {% else %}
+              ❌ SYSTEM IS INOPERABLE
+
+              Critical failures detected:
+              {% for failure in operational_failures %}
+                • {{ failure }}
+              {% endfor %}
+
+              Rollback will be initiated to restore functionality.
+              {% endif %}
+              =========================================================================
+
+        - name: Decide if rollback is needed based on operability
+          when: not system_is_operable and auto_rollback_on_failure
+          block:
+            - name: Set failure details for inoperable system
+              ansible.builtin.set_fact:
+                failure_reason: "System is inoperable after STIG hardening"
+                failure_details: "Critical failures: {{ operational_failures | join(', ') }}"
+                failure_type: "system_inoperable"
+
+            - name: Display rollback warning
+              ansible.builtin.debug:
+                msg: "⚠️ System is inoperable, initiating rollback..."
+
+            - name: Execute emergency rollback
+              ansible.builtin.include_tasks: perform_rollback.yml
+              vars:
+                rollback_reason: "{{ failure_reason }}"
+                rollback_details: "{{ failure_details }}"
+
+    - name: Run post-hardening audit
+      ansible.builtin.command: >
+        oscap xccdf eval
+        --profile {{ stig_profile_id }}
+        --results "{{ stig_audit_dir }}/post_hardening_{{ backup_timestamp }}.xml"
+        --results-arf "{{ stig_audit_dir }}/post_hardening_{{ backup_timestamp }}-arf.xml"
+        --report "{{ stig_audit_dir }}/post_hardening_{{ backup_timestamp }}.html"
+        {% if stig_tailoring_file is defined and stig_tailoring_file | length > 0 %}
+        --tailoring-file "{{ stig_tailoring_file }}"
+        {% endif %}
+        "{{ scap_ds_path }}"
+      register: post_scan
+      failed_when: false
+      changed_when: false
+      when: apply_remediations
+
+    - name: Check if post-hardening audit XML exists
+      ansible.builtin.stat:
+        path: "{{ stig_audit_dir }}/post_hardening_{{ backup_timestamp }}.xml"
+      register: post_xml_stat
+      when: apply_remediations
+
+    - name: Parse post-hardening audit results
+      ansible.builtin.command: "{{ stig_work_dir }}/parse_oscap_score.py {{ stig_audit_dir }}/post_hardening_{{ backup_timestamp }}.xml"
+      register: post_score
+      changed_when: false
+      when: apply_remediations and post_xml_stat.stat.exists
+
+    - name: Set default post-hardening score if XML not found
+      ansible.builtin.set_fact:
+        post_score:
+          stdout: '0.0'
+      when: apply_remediations and (not post_xml_stat.stat.exists or post_score is not defined)
+
+#########################################################################
+# PHASE 6: FINAL SUMMARY AND ROLLBACK INSTRUCTIONS
+#########################################################################
+
+    - name: Display hardening summary
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================="
+          - "            RHEL {{ ansible_distribution_major_version }} DISA STIG HARDENING COMPLETE"
+          - "========================================================================="
+          - "Target Host            : {{ inventory_hostname }}"
+          - "RHEL Version           : {{ ansible_distribution_version }}"
+          - "Baseline Compliance    : {{ baseline_score.stdout }}%"
+          - "{% if apply_remediations %}Post-Hardening Compliance : {{ post_score.stdout }}%{% endif %}"
+          - "{% if apply_remediations %}Compliance Improvement    : +{{ (post_score.stdout | float - baseline_score.stdout | float) | round(2) }}%{% endif %}"
+          - "-------------------------------------------------------------------------"
+          - "Backup Archive         : {{ backup_archive | default('Not created') }}"
+          - "Baseline Report        : {{ stig_audit_dir }}/baseline_{{ backup_timestamp }}.html"
+          - "{% if apply_remediations %}Post-Hardening Report   : {{ stig_audit_dir }}/post_hardening_{{ backup_timestamp }}.html{% endif %}"
+          - "========================================================================"
+          - ""
+          - "{% if enable_auto_backup %}✓ ROLLBACK CAPABILITY ENABLED{% endif %}"
+          - ""
+          - "  ansible-playbook -i inventory rhel8_stig_revert.yml \\"
+          - "    -e backup_name={{ backup_name }}"
+          - "========================================================================="

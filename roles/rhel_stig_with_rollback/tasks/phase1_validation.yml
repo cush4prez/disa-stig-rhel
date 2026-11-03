@@ -1,0 +1,36 @@
+---
+# Phase 1: Pre-hardening validation
+
+- name: Verify supported RHEL version
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == "RedHat"
+      - ansible_distribution_major_version | int in [7, 8, 9, 10]
+    fail_msg: "This role supports RHEL 7, 8, 9, and 10 only. Detected: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+    success_msg: "RHEL {{ ansible_distribution_major_version }} detected - proceeding with STIG hardening"
+
+- name: Display hardening plan
+  ansible.builtin.debug:
+    msg:
+      - "========================================================================="
+      - "       RHEL {{ ansible_distribution_major_version }} DISA STIG HARDENING WITH ROLLBACK PROTECTION"
+      - "========================================================================="
+      - "Target Host        : {{ inventory_hostname }}"
+      - "RHEL Version       : {{ ansible_distribution_version }}"
+      - "Auto Backup        : {{ 'Enabled' if rhel_stig_with_rollback_enable_auto_backup else 'Disabled' }}"
+      - "Auto Rollback      : {{ 'Enabled' if rhel_stig_with_rollback_auto_rollback_on_failure else 'Disabled' }}"
+      - "Backup Location    : {{ rhel_stig_with_rollback_backup_root }}/{{ rhel_stig_with_rollback_backup_name }}.tar.gz"
+      - "========================================================================"
+
+- name: Verify SCAP content exists
+  ansible.builtin.stat:
+    path: "{{ rhel_stig_with_rollback_scap_ds_path }}"
+  register: rhel_stig_with_rollback_scap_stat
+
+- name: Install SCAP content if missing
+  ansible.builtin.dnf:
+    name:
+      - openscap-scanner
+      - scap-security-guide
+    state: present
+  when: not rhel_stig_with_rollback_scap_stat.stat.exists

@@ -1,0 +1,174 @@
+---
+# Query STIG Status Playbook
+# Allows a user to input multiple comma-separated STIG IDs
+# and returns their statuses from the most recent OpenSCAP audit XML.
+
+- name: Query Specific STIG ID Status
+  hosts: all
+  become: true
+  gather_facts: false
+
+  # If running in AAP/AWX, replace this prompt with a Survey variable named 'target_stig_ids'
+  vars_prompt:
+    - name: target_stig_ids
+      prompt: "Enter STIG IDs to query (comma-separated, e.g., V-230222, V-230223)"
+      private: false
+
+  vars:
+    stig_audit_dir: "/opt/stig_audit"
+    stig_work_dir: "/opt/stig_work"
+
+  tasks:
+    - name: Find all audit XML files
+      ansible.builtin.find:
+        paths: "{{ stig_audit_dir }}"
+        patterns: "final_audit_*.xml"
+        file_type: file
+      register: found_xmls
+
+    - name: Fail if no XML files exist
+      ansible.builtin.fail:
+        msg: "No audit XML files found in {{ stig_audit_dir }}. Please run the audit playbook first."
+      when: found_xmls.matched == 0
+
+    - name: Determine the latest XML file
+      ansible.builtin.set_fact:
+        latest_xml: "{{ (found_xmls.files | sort(attribute='mtime') | last).path }}"
+
+    - name: Ensure work directory exists
+      ansible.builtin.file:
+        path: "{{ stig_work_dir }}"
+        state: directory
+        mode: '0750'
+
+    - name: Deploy STIG query Python script
+      ansible.builtin.copy:
+        dest: "{{ stig_work_dir }}/query_stig.py"
+        mode: '0755'
+        content: |
+          #!/usr/bin/env python3
+          import sys, os, json
+          import xml.etree.ElementTree as ET
+
+          def get_tag(element):
+              return element.tag.split('}')[-1] if '}' in element.tag else element.tag
+
+          def extract_stig_id(rule_element):
+              best_match = None
+              for child in rule_element.iter():
+                  tag = get_tag(child)
+                  if tag in ['ident', 'reference']:
+                      text_val = child.text.strip() if child.text else ''
+                      if text_val.startswith('SRG-') or text_val.startswith('CCI-'):
+                          continue
+                      if text_val.startswith('V-') or text_val.startswith('SV-') or text_val.startswith('RHEL-'):
+                          return text_val
+                      if child.get('role', '').lower() == 'stigref':
+                          best_match = text_val
+              return best_match
+
+          def main():
+              if len(sys.argv) != 3:
+                  print(json.dumps({"error": "Missing arguments"}))
+                  sys.exit(1)
+
+              xml_file = sys.argv[1]
+              # Parse comma-separated list into a Python list, stripping whitespace
+              target_stigs = [s.strip() for s in sys.argv[2].split(',') if s.strip()]
+
+              try:
+                  tree = ET.parse(xml_file)
+                  root = tree.getroot()
+
+                  # Dictionary to map found Rule IDs to their data
+                  rule_map = {}
+
+                  # 1. Find all requested Rule definitions
+                  for rule in root.iter():
+                      if get_tag(rule) == 'Rule':
+                          stig_id = extract_stig_id(rule)
+                          if stig_id in target_stigs:
+                              rule_id = rule.get('id')
+                              title = "Unknown"
+                              for child in rule:
+                                  if get_tag(child) == 'title':
+                                      title = child.text.strip() if child.text else "Unknown"
+                                      break
+
+                              rule_map[rule_id] = {
+                                  "stig_id": stig_id,
+                                  "title": title,
+                                  "status": "NOT CHECKED" # Default status
+                              }
+
+                  # 2. Find the execution results for the mapped rules
+                  for test_result in root.iter():
+                      if get_tag(test_result) == 'TestResult':
+                          for rr in test_result:
+                              if get_tag(rr) == 'rule-result':
+                                  r_id = rr.get('idref')
+                                  if r_id in rule_map:
+                                      for res in rr:
+                                          if get_tag(res) == 'result':
+                                              rule_map[r_id]["status"] = res.text.strip().upper() if res.text else "UNKNOWN"
+                                              break
+
+                  # 3. Format the final output, ensuring every requested STIG gets a response
+                  final_output = []
+                  found_stigs = [data['stig_id'] for data in rule_map.values()]
+
+                  for t_stig in target_stigs:
+                      if t_stig in found_stigs:
+                          # Extract data from rule_map
+                          for r_id, data in rule_map.items():
+                              if data['stig_id'] == t_stig:
+                                  final_output.append({
+                                      "stig_id": t_stig,
+                                      "rule_id": r_id,
+                                      "title": data['title'],
+                                      "status": data['status']
+                                  })
+                      else:
+                          # Handle STIGs that were not found in the XML at all
+                          final_output.append({
+                              "stig_id": t_stig,
+                              "rule_id": "N/A",
+                              "title": "STIG ID does not exist in this XML profile",
+                              "status": "NOT FOUND"
+                          })
+
+                  print(json.dumps(final_output))
+
+              except Exception as e:
+                  print(json.dumps([{"error": str(e)}]))
+
+          if __name__ == "__main__":
+              main()
+
+    - name: Execute STIG query
+      ansible.builtin.command: "{{ stig_work_dir }}/query_stig.py {{ latest_xml }} '{{ target_stig_ids }}'"
+      register: query_output
+      changed_when: false
+
+    - name: Parse JSON results
+      ansible.builtin.set_fact:
+        stig_result_data: "{{ query_output.stdout | from_json }}"
+
+    - name: Display STIG Status Dashboard
+      ansible.builtin.debug:
+        msg: |
+          =========================================================================
+                             STIG QUERY RESULT: {{ inventory_hostname }}
+          =========================================================================
+          Target XML : {{ latest_xml | basename }}
+
+          {% for item in stig_result_data %}
+          -------------------------------------------------------------------------
+          STIG ID    : {{ item.stig_id }}
+          Rule ID    : {{ item.rule_id }}
+          Title      : {{ item.title }}
+          STATUS     : {% if item.status == 'PASS' %}✅ PASS{% elif item.status == 'FAIL' -%}
+          ❌ FAIL{% elif item.status == 'NOT FOUND' -%}
+          ⚠️ NOT FOUND{% else %}⏸️ {{ item.status }}{% endif %}
+          {% endfor %}
+          =========================================================================

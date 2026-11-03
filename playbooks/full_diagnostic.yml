@@ -1,0 +1,245 @@
+---
+- name: Full STIG Workflow Diagnostic
+  hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Display system information
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================="
+          - "SYSTEM INFORMATION"
+          - "========================================================================="
+          - "Hostname: {{ ansible_hostname }}"
+          - "Distribution: {{ ansible_distribution }}"
+          - "Distribution Version: {{ ansible_distribution_version }}"
+          - "Distribution Major Version: {{ ansible_distribution_major_version }}"
+          - "OS Family: {{ ansible_os_family }}"
+          - "Architecture: {{ ansible_architecture }}"
+          - "========================================================================="
+
+    - name: Set SCAP variables (same as role)
+      ansible.builtin.set_fact:
+        detected_scap_path: "/usr/share/xml/scap/ssg/content/ssg-rhel{{ ansible_distribution_major_version }}-ds.xml"
+        detected_profile: "xccdf_org.ssgproject.content_profile_stig"
+
+    - name: Display detected SCAP configuration
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================="
+          - "DETECTED SCAP CONFIGURATION"
+          - "========================================================================="
+          - "SCAP Data Stream Path: {{ detected_scap_path }}"
+          - "Profile ID: {{ detected_profile }}"
+          - "========================================================================="
+
+    - name: Check if SCAP file exists
+      ansible.builtin.stat:
+        path: "{{ detected_scap_path }}"
+      register: scap_file_check
+
+    - name: Display SCAP file status
+      ansible.builtin.debug:
+        msg:
+          - "SCAP File Exists: {{ scap_file_check.stat.exists }}"
+          - "{% if scap_file_check.stat.exists %}File Size: {{ scap_file_check.stat.size }} bytes{% endif %}"
+          - "{% if not scap_file_check.stat.exists %}ERROR: SCAP file not found! Need to install scap-security-guide{% endif %}"
+
+    - name: Check installed SCAP packages
+      ansible.builtin.package_facts:
+        manager: auto
+
+    - name: Display SCAP packages
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================="
+          - "INSTALLED SCAP PACKAGES"
+          - "========================================================================="
+          - "openscap-scanner: {{ 'INSTALLED - ' + ansible_facts.packages['openscap-scanner'][0].version if 'openscap-scanner' in ansible_facts.packages else 'NOT INSTALLED' }}"
+          - "scap-security-guide: {{ 'INSTALLED - ' + ansible_facts.packages['scap-security-guide'][0].version if 'scap-security-guide' in ansible_facts.packages else 'NOT INSTALLED' }}"
+          - "========================================================================="
+
+    - name: List available SCAP data streams
+      ansible.builtin.find:
+        paths: /usr/share/xml/scap/ssg/content/
+        patterns: "ssg-rhel*-ds.xml"
+      register: available_datastreams
+      failed_when: false
+
+    - name: Display available data streams
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================="
+          - "AVAILABLE SCAP DATA STREAMS"
+          - "========================================================================="
+          - "{{ available_datastreams.files | map(attribute='path') | list }}"
+          - "========================================================================="
+
+    - name: Get SCAP info for detected file
+      ansible.builtin.command: oscap info "{{ detected_scap_path }}"
+      register: oscap_info
+      failed_when: false
+      changed_when: false
+      when: scap_file_check.stat.exists
+
+    - name: Display available profiles
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================="
+          - "AVAILABLE PROFILES IN {{ detected_scap_path }}"
+          - "========================================================================="
+          - "{{ oscap_info.stdout_lines }}"
+          - "========================================================================="
+      when: scap_file_check.stat.exists and oscap_info.rc == 0
+
+    - name: Check if STIG profile exists
+      ansible.builtin.shell: |
+        oscap info "{{ detected_scap_path }}" | grep -i "{{ detected_profile }}"
+      register: profile_check
+      failed_when: false
+      changed_when: false
+      when: scap_file_check.stat.exists
+
+    - name: Display profile check result
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================="
+          - "STIG PROFILE CHECK"
+          - "========================================================================="
+          - "Profile ID: {{ detected_profile }}"
+          - "Found: {{ 'YES' if profile_check.rc == 0 else 'NO - PROFILE DOES NOT EXIST!' }}"
+          - "{% if profile_check.rc == 0 %}{{ profile_check.stdout }}{% endif %}"
+          - "========================================================================="
+      when: scap_file_check.stat.exists
+
+    - name: Test remediation script generation
+      block:
+        - name: Create test directory
+          ansible.builtin.file:
+            path: /tmp/stig_test
+            state: directory
+            mode: '0750'
+
+        - name: Generate test remediation script
+          ansible.builtin.command: >
+            oscap xccdf generate fix
+            --fix-type bash
+            --profile {{ detected_profile }}
+            --output /tmp/stig_test/test_remediation.sh
+            "{{ detected_scap_path }}"
+          register: gen_remediation
+          failed_when: false
+          changed_when: false
+
+        - name: Check generated script
+          ansible.builtin.stat:
+            path: /tmp/stig_test/test_remediation.sh
+          register: test_script_stat
+
+        - name: Count functions in test script
+          ansible.builtin.shell: grep -c "^function " /tmp/stig_test/test_remediation.sh || echo "0"
+          register: test_function_count
+          failed_when: false
+          changed_when: false
+          when: test_script_stat.stat.exists
+
+        - name: Display remediation generation test
+          ansible.builtin.debug:
+            msg:
+              - "========================================================================="
+              - "REMEDIATION SCRIPT GENERATION TEST"
+              - "========================================================================="
+              - "Command Exit Code: {{ gen_remediation.rc }}"
+              - "Script Generated: {{ test_script_stat.stat.exists }}"
+              - "Script Size: {{ test_script_stat.stat.size | default(0) }} bytes"
+              - "Functions Count: {{ test_function_count.stdout | default('N/A') }}"
+              - ""
+              - "{% if gen_remediation.rc != 0 %}ERROR OUTPUT:{% endif %}"
+              - "{% if gen_remediation.rc != 0 %}{{ gen_remediation.stderr }}{% endif %}"
+              - ""
+              - "DIAGNOSIS:"
+              - "{% if test_script_stat.stat.exists and test_script_stat.stat.size > 10000 %}"
+              - "  ✓ Remediation generation WORKS - script is good size"
+              - "{% elif test_script_stat.stat.exists and test_script_stat.stat.size < 1000 %}"
+              - "  ✗ Script generated but TOO SMALL - likely empty or error"
+              - "{% elif not test_script_stat.stat.exists %}"
+              - "  ✗ Script NOT generated - check error output above"
+              - "{% endif %}"
+              - "========================================================================="
+
+        - name: Show first 30 lines of remediation script
+          ansible.builtin.command: head -30 /tmp/stig_test/test_remediation.sh
+          register: script_preview
+          failed_when: false
+          changed_when: false
+          when: test_script_stat.stat.exists and test_script_stat.stat.size > 0
+
+        - name: Display script preview
+          ansible.builtin.debug:
+            msg:
+              - "========================================================================="
+              - "REMEDIATION SCRIPT PREVIEW (first 30 lines)"
+              - "========================================================================="
+              - "{{ script_preview.stdout_lines }}"
+              - "========================================================================="
+          when: test_script_stat.stat.exists and test_script_stat.stat.size > 0
+
+      when: scap_file_check.stat.exists
+
+    - name: Check actual role variables
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================="
+          - "ACTUAL ROLE VARIABLES (if using role)"
+          - "========================================================================="
+          - "rhel_stig_with_rollback_scap_ds_path: {{ rhel_stig_with_rollback_scap_ds_path | default('NOT SET') }}"
+          - "rhel_stig_with_rollback_stig_profile_id: {{ rhel_stig_with_rollback_stig_profile_id | default('NOT SET') }}"
+          - "========================================================================="
+
+    - name: Final diagnosis summary
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================="
+          - "FINAL DIAGNOSIS SUMMARY"
+          - "========================================================================="
+          - ""
+          - "1. OS Detection:"
+          - "   RHEL Version: {{ ansible_distribution_major_version }}"
+          - "   Expected SCAP: ssg-rhel{{ ansible_distribution_major_version }}-ds.xml"
+          - ""
+          - "2. SCAP File:"
+          - "   Path: {{ detected_scap_path }}"
+          - "   Exists: {{ scap_file_check.stat.exists }}"
+          - ""
+          - "3. Profile:"
+          - "   ID: {{ detected_profile }}"
+          - "   Valid: {{ 'YES' if profile_check.rc == 0 else 'NO' }}"
+          - ""
+          - "4. Remediation Generation:"
+          - "   Works: {{ 'YES' if test_script_stat.stat.exists and test_script_stat.stat.size > 10000 else 'NO' }}"
+          - "   Script Size: {{ test_script_stat.stat.size | default(0) }} bytes"
+          - ""
+          - "PROBLEMS FOUND:"
+          - "{% if not scap_file_check.stat.exists %}"
+          - "  ✗ SCAP file missing - need to install scap-security-guide"
+          - "{% endif %}"
+          - "{% if profile_check.rc != 0 %}"
+          - "  ✗ STIG profile not found in data stream"
+          - "{% endif %}"
+          - "{% if test_script_stat.stat.exists and test_script_stat.stat.size < 10000 %}"
+          - "  ✗ Remediation script too small - generation failed"
+          - "{% endif %}"
+          - ""
+          - "NEXT STEPS:"
+          - "{% if not scap_file_check.stat.exists %}"
+          - "  1. Install scap-security-guide: dnf install -y scap-security-guide"
+          - "{% elif profile_check.rc != 0 %}"
+          - "  1. Check available profiles: oscap info {{ detected_scap_path }}"
+          - "  2. Update profile ID in role defaults if needed"
+          - "{% elif test_script_stat.stat.exists and test_script_stat.stat.size > 10000 %}"
+          - "  1. Generation works! Check if remediation is actually being executed"
+          - "  2. Check remediation log: /opt/stig_work/remediation_*.log"
+          - "  3. Verify remediation script has execute permissions"
+          - "{% endif %}"
+          - "========================================================================="

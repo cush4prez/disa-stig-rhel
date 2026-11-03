@@ -1,0 +1,165 @@
+---
+# System Operational Verification Task File
+# This checks if a system is FUNCTIONAL and OPERABLE
+# It does NOT check STIG compliance - only if the system works
+#
+# Returns: Sets fact 'system_is_operable' to true/false
+
+- name: Initialize operational status
+  ansible.builtin.set_fact:
+    rhel_stig_with_rollback_system_is_operable: true
+    rhel_stig_with_rollback_operational_failures: []
+    rhel_stig_with_rollback_operational_warnings: []
+
+#########################################################################
+# CRITICAL: Can we execute commands?
+#########################################################################
+
+- name: CRITICAL - Test basic command execution
+  ansible.builtin.command: echo "System responsive"
+  register: rhel_stig_with_rollback_echo_test
+  failed_when: false
+  changed_when: false
+
+- name: Check command execution
+  ansible.builtin.set_fact:
+    rhel_stig_with_rollback_system_is_operable: false
+    rhel_stig_with_rollback_operational_failures: "{{ rhel_stig_with_rollback_operational_failures + ['Cannot execute basic commands'] }}"
+  when: rhel_stig_with_rollback_echo_test.rc != 0
+
+#########################################################################
+# CRITICAL: Is SSH service working?
+#########################################################################
+
+- name: CRITICAL - Check SSH service status
+  ansible.builtin.systemd:
+    name: sshd
+  register: rhel_stig_with_rollback_sshd_status
+  failed_when: false
+
+- name: Verify SSH is running
+  ansible.builtin.set_fact:
+    rhel_stig_with_rollback_system_is_operable: false
+    rhel_stig_with_rollback_operational_failures: >-
+      {{ rhel_stig_with_rollback_operational_failures +
+         ['SSH service is not running - remote access will be lost'] }}
+  when: rhel_stig_with_rollback_sshd_status.status.ActiveState | default('unknown') != "active"
+
+- name: Test SSH is actually listening
+  ansible.builtin.wait_for:
+    port: 22
+    timeout: 5
+    state: started
+  register: rhel_stig_with_rollback_ssh_listening
+  failed_when: false
+
+- name: Check SSH port accessibility
+  ansible.builtin.set_fact:
+    rhel_stig_with_rollback_system_is_operable: false
+    rhel_stig_with_rollback_operational_failures: "{{ rhel_stig_with_rollback_operational_failures + ['SSH not listening on port 22'] }}"
+  when: rhel_stig_with_rollback_ssh_listening.failed | default(false)
+
+#########################################################################
+# CRITICAL: Can users login?
+#########################################################################
+
+- name: CRITICAL - Verify critical PAM files exist
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - /etc/pam.d/system-auth
+    - /etc/pam.d/password-auth
+    - /etc/pam.d/sshd
+  register: rhel_stig_with_rollback_pam_files
+  failed_when: false
+
+- name: Check PAM configuration
+  ansible.builtin.set_fact:
+    rhel_stig_with_rollback_system_is_operable: false
+    rhel_stig_with_rollback_operational_failures: "{{ rhel_stig_with_rollback_operational_failures + ['Critical PAM files missing - users cannot login'] }}"
+  when: rhel_stig_with_rollback_pam_files.results | selectattr('stat.exists', 'equalto', false) | list | length > 0
+
+#########################################################################
+# CRITICAL: File system accessible
+#########################################################################
+
+- name: CRITICAL - Check root filesystem is writable
+  ansible.builtin.command: touch /tmp/.stig_operational_test
+  register: rhel_stig_with_rollback_fs_write_test
+  failed_when: false
+  changed_when: false
+
+- name: Verify filesystem is writable
+  ansible.builtin.set_fact:
+    rhel_stig_with_rollback_system_is_operable: false
+    rhel_stig_with_rollback_operational_failures: "{{ rhel_stig_with_rollback_operational_failures + ['Root filesystem is read-only'] }}"
+  when: rhel_stig_with_rollback_fs_write_test.rc != 0
+
+- name: Cleanup test file
+  ansible.builtin.file:
+    path: /tmp/.stig_operational_test
+    state: absent
+  failed_when: false
+
+#########################################################################
+# IMPORTANT: Critical services (configurable)
+#########################################################################
+
+- name: Check critical services status
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+  loop: "{{ rhel_stig_with_rollback_critical_services | default(['sshd', 'NetworkManager']) }}"
+  register: rhel_stig_with_rollback_critical_services_status
+  failed_when: false
+
+- name: Identify failed critical services
+  ansible.builtin.set_fact:
+    rhel_stig_with_rollback_failed_critical_services: >-
+      {{ rhel_stig_with_rollback_critical_services_status.results
+         | rejectattr('status.ActiveState', 'equalto', 'active')
+         | map(attribute='item')
+         | list }}
+
+- name: Mark system inoperable if critical services down
+  ansible.builtin.set_fact:
+    rhel_stig_with_rollback_system_is_operable: false
+    rhel_stig_with_rollback_operational_failures: >-
+      {{ rhel_stig_with_rollback_operational_failures +
+         ['Critical services not running: ' +
+          (rhel_stig_with_rollback_failed_critical_services | join(', '))] }}
+  when: rhel_stig_with_rollback_failed_critical_services | default([]) | length > 0
+
+#########################################################################
+# SUMMARY
+#########################################################################
+
+- name: Display operational check results
+  ansible.builtin.debug:
+    msg: |
+      =========================================================================
+                          SYSTEM OPERATIONAL CHECK
+      =========================================================================
+      System is operable: {{ rhel_stig_with_rollback_system_is_operable }}
+
+      {% if rhel_stig_with_rollback_operational_failures | length > 0 %}
+      CRITICAL FAILURES ({{ rhel_stig_with_rollback_operational_failures | length }}):
+      {% for failure in rhel_stig_with_rollback_operational_failures %}
+        ❌ {{ failure }}
+      {% endfor %}
+      {% endif %}
+
+      {% if rhel_stig_with_rollback_operational_warnings | length > 0 %}
+      WARNINGS ({{ rhel_stig_with_rollback_operational_warnings | length }}):
+      {% for warning in rhel_stig_with_rollback_operational_warnings %}
+        ⚠️  {{ warning }}
+      {% endfor %}
+      {% endif %}
+
+      {% if rhel_stig_with_rollback_system_is_operable %}
+      ✅ VERDICT: System is FUNCTIONAL - No rollback needed
+         (Remaining STIG findings can be addressed manually)
+      {% else %}
+      ❌ VERDICT: System is INOPERABLE - Rollback recommended
+         (Critical failures prevent normal operation)
+      {% endif %}
+      =========================================================================

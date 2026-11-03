@@ -1,0 +1,118 @@
+---
+# Interactive DISA STIG playbook with survey prompts (for CLI execution)
+# For Ansible Automation Platform 2.7, use rhel_stig_with_rollback.yml with the survey configuration
+
+- name: RHEL DISA STIG with Rollback (Interactive Mode)
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars_prompt:
+    - name: stig_audit_mode
+      prompt: |
+
+        ╔════════════════════════════════════════════════════════════════════════╗
+        ║                      STIG AUDIT MODE SELECTION                         ║
+        ╚════════════════════════════════════════════════════════════════════════╝
+
+        Select STIG audit mode:
+
+          [1] full      - Audit ALL STIG rules from the profile (default)
+          [2] selective - Audit only specific STIG rules you specify
+
+        Enter your choice (1 or 2)
+      private: false
+      default: "1"
+
+    - name: stig_rules_input
+      prompt: |
+
+        ╔════════════════════════════════════════════════════════════════════════╗
+        ║                   SELECTIVE STIG RULES (Optional)                      ║
+        ╚════════════════════════════════════════════════════════════════════════╝
+
+        Enter comma-separated list of STIG rule IDs to audit.
+        (Only applies if you selected 'selective' mode above)
+
+        Examples:
+          - sysctl_crypto_fips_enabled
+          - audit_rules_login_events,sshd_set_idle_timeout
+          - file_permissions_var_log_audit
+
+        Leave blank to skip (or if using 'full' mode)
+      private: false
+      default: ""
+
+    - name: apply_remediations_choice
+      prompt: |
+
+        ╔════════════════════════════════════════════════════════════════════════╗
+        ║                        REMEDIATION SETTINGS                            ║
+        ╚════════════════════════════════════════════════════════════════════════╝
+
+        Apply remediations automatically?
+
+          [1] yes - Apply remediations (default)
+          [2] no  - Audit only, do not remediate
+
+        Enter your choice (1 or 2)
+      private: false
+      default: "1"
+
+    - name: auto_rollback_choice
+      prompt: |
+
+        ╔════════════════════════════════════════════════════════════════════════╗
+        ║                         ROLLBACK SETTINGS                              ║
+        ╚════════════════════════════════════════════════════════════════════════╝
+
+        Automatically rollback if operational verification fails?
+
+          [1] yes - Auto rollback on failure (default, recommended)
+          [2] no  - Do not auto rollback
+
+        Enter your choice (1 or 2)
+      private: false
+      default: "1"
+
+  pre_tasks:
+    - name: Convert survey inputs to role variables
+      ansible.builtin.set_fact:
+        rhel_stig_with_rollback_stig_rules_to_apply: >-
+          {% if stig_audit_mode == "2" or stig_audit_mode == "selective" %}
+          {{ stig_rules_input.split(',') | map('trim') | select | list }}
+          {% else %}
+          []
+          {% endif %}
+        rhel_stig_with_rollback_apply_remediations: >-
+          {{ apply_remediations_choice == "1" or apply_remediations_choice == "yes" or apply_remediations_choice == "true" }}
+        rhel_stig_with_rollback_auto_rollback_on_failure: >-
+          {{ auto_rollback_choice == "1" or auto_rollback_choice == "yes" or auto_rollback_choice == "true" }}
+
+    - name: Display configuration summary
+      ansible.builtin.debug:
+        msg:
+          - "╔════════════════════════════════════════════════════════════════════════╗"
+          - "║                    CONFIGURATION SUMMARY                               ║"
+          - "╚════════════════════════════════════════════════════════════════════════╝"
+          - ""
+          - "Audit Mode          : {% if rhel_stig_with_rollback_stig_rules_to_apply | length > 0 %}SELECTIVE{% else %}FULL{% endif %}"
+          - "Selected Rules      : {{ rhel_stig_with_rollback_stig_rules_to_apply | length }} rules"
+          - "Apply Remediations  : {{ rhel_stig_with_rollback_apply_remediations }}"
+          - "Auto Rollback       : {{ rhel_stig_with_rollback_auto_rollback_on_failure }}"
+          - ""
+          - >-
+            {% if rhel_stig_with_rollback_stig_rules_to_apply | length > 0 %}Rules to audit:
+            {% for rule in rhel_stig_with_rollback_stig_rules_to_apply %}  - {{ rule }}{% endfor %}{% endif %}
+          - ""
+          - "╚════════════════════════════════════════════════════════════════════════╝"
+
+    - name: Confirm to continue
+      ansible.builtin.pause:
+        prompt: |
+
+          Press ENTER to continue with this configuration, or Ctrl+C then 'A' to abort
+      when: rhel_stig_with_rollback_apply_remediations | bool
+
+  roles:
+    - role: rhel_stig_with_rollback

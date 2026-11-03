@@ -1,0 +1,153 @@
+---
+- name: Debug OSCAP Score Calculation
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    test_timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
+    stig_profile_id: "xccdf_org.ssgproject.content_profile_stig"
+    scap_ds_path: "/usr/share/xml/scap/ssg/content/ssg-rhel{{ ansible_distribution_major_version }}-ds.xml"
+    test_dir: "/tmp/oscap_debug_{{ test_timestamp }}"
+
+  tasks:
+    - name: Create test directory
+      ansible.builtin.file:
+        path: "{{ test_dir }}"
+        state: directory
+        mode: '0750'
+
+    - name: Run OSCAP scan
+      ansible.builtin.command: >
+        oscap xccdf eval
+        --profile {{ stig_profile_id }}
+        --results "{{ test_dir }}/results.xml"
+        --results-arf "{{ test_dir }}/results-arf.xml"
+        --report "{{ test_dir }}/report.html"
+        "{{ scap_ds_path }}"
+      register: oscap_scan
+      failed_when: false
+      changed_when: false
+
+    - name: Display scan exit code
+      ansible.builtin.debug:
+        msg:
+          - "OSCAP Exit Code: {{ oscap_scan.rc }}"
+          - "  0 = All rules passed (compliant)"
+          - "  2 = Some rules failed (non-compliant) - NORMAL"
+          - "  1 = Error in scan"
+
+    - name: Extract all score elements from XML
+      ansible.builtin.shell: |
+        grep -A2 '<score' "{{ test_dir }}/results.xml" || echo "No scores found"
+      register: all_scores
+      failed_when: false
+      changed_when: false
+
+    - name: Display all scores found
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================="
+          - "ALL SCORE ELEMENTS IN XML:"
+          - "========================================================================="
+          - "{{ all_scores.stdout_lines }}"
+
+    - name: Count pass/fail/notapplicable/notchecked
+      ansible.builtin.shell: |
+        echo "Total rules checked:"
+        grep -c 'rule-result' "{{ test_dir }}/results.xml" || echo "0"
+        echo ""
+        echo "Pass:"
+        grep 'result>pass<' "{{ test_dir }}/results.xml" | wc -l
+        echo ""
+        echo "Fail:"
+        grep 'result>fail<' "{{ test_dir }}/results.xml" | wc -l
+        echo ""
+        echo "Notapplicable:"
+        grep 'result>notapplicable<' "{{ test_dir }}/results.xml" | wc -l
+        echo ""
+        echo "Notchecked:"
+        grep 'result>notchecked<' "{{ test_dir }}/results.xml" | wc -l
+        echo ""
+        echo "Error:"
+        grep 'result>error<' "{{ test_dir }}/results.xml" | wc -l
+      register: result_counts
+      failed_when: false
+      changed_when: false
+
+    - name: Display result breakdown
+      ansible.builtin.debug:
+        var: result_counts.stdout_lines
+
+    - name: Calculate actual compliance manually
+      ansible.builtin.shell: |
+        PASS=$(grep -c 'result>pass<' "{{ test_dir }}/results.xml" || echo "0")
+        FAIL=$(grep -c 'result>fail<' "{{ test_dir }}/results.xml" || echo "0")
+        TOTAL=$((PASS + FAIL))
+        if [ $TOTAL -gt 0 ]; then
+          PERCENT=$(awk "BEGIN {printf \"%.2f\", ($PASS / $TOTAL) * 100}")
+        else
+          PERCENT="0.00"
+        fi
+        echo "Pass: $PASS"
+        echo "Fail: $FAIL"
+        echo "Total checked: $TOTAL"
+        echo "Compliance: $PERCENT%"
+      register: manual_calc
+      failed_when: false
+      changed_when: false
+
+    - name: Display manual calculation
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================="
+          - "MANUAL COMPLIANCE CALCULATION:"
+          - "========================================================================="
+          - "{{ manual_calc.stdout_lines }}"
+          - "========================================================================="
+          - ""
+          - "This should be 30-50% for a non-STIG'd system"
+          - "If showing 95%+, the score element is using wrong metric"
+
+    - name: Run parse_oscap_score.py
+      ansible.builtin.shell: |
+        python3 - "{{ test_dir }}/results.xml" << 'EOF'
+        import sys
+        import xml.etree.ElementTree as ET
+
+        xml_file = sys.argv[1]
+        tree = ET.parse(xml_file)
+        root = tree.getroot()
+
+        def get_tag(elem):
+            return elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+
+        print("All score elements found:")
+        for elem in root.iter():
+            if get_tag(elem) == 'score':
+                print(f"  Value: {elem.text}, System: {elem.get('system')}, Max: {elem.get('maximum')}")
+        EOF
+      register: python_scores
+      failed_when: false
+      changed_when: false
+
+    - name: Display Python score analysis
+      ansible.builtin.debug:
+        var: python_scores.stdout_lines
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================="
+          - "DIAGNOSIS COMPLETE"
+          - "========================================================================="
+          - "Files created in: {{ test_dir }}"
+          - ""
+          - "Next steps:"
+          - "  1. Check {{ test_dir }}/report.html in browser"
+          - "  2. Compare 'Manual calculation' vs 'parse_oscap_score.py' result"
+          - "  3. If parse script shows 95% but manual shows 40%, the score element is wrong"
+          - ""
+          - "To view HTML report:"
+          - "  firefox {{ test_dir }}/report.html"
+          - "========================================================================="

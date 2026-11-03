@@ -1,0 +1,6 @@
+---
+# rhel_stig_with_rollback role handlers
+
+- name: Rollback changes
+  ansible.builtin.include_tasks: ../tasks/rollback.yml
+  when: rhel_stig_with_rollback_auto_rollback_on_failure

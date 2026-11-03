@@ -1,0 +1,50 @@
+---
+dependency:
+  name: galaxy
+driver:
+  name: podman
+platforms:
+  - name: rhel8-molecule
+    image: registry.access.redhat.com/ubi8/ubi-init:latest
+    pre_build_image: true
+    privileged: true
+    command: /usr/sbin/init
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    capabilities:
+      - SYS_ADMIN
+    security_opts:
+      - seccomp=unconfined
+    groups:
+      - rhel8
+  - name: rhel9-molecule
+    image: registry.access.redhat.com/ubi9/ubi-init:latest
+    pre_build_image: true
+    privileged: true
+    command: /usr/sbin/init
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    capabilities:
+      - SYS_ADMIN
+    security_opts:
+      - seccomp=unconfined
+    groups:
+      - rhel9
+provisioner:
+  name: ansible
+  inventory:
+    group_vars:
+      all:
+        ansible_python_interpreter: /usr/bin/python3
+        ansible_become: false
+  config_options:
+    defaults:
+      callbacks_enabled: profile_tasks,timer
+      stdout_callback: default
+  env:
+    ANSIBLE_STDOUT_CALLBACK: default
+  playbooks:
+    converge: converge.yml
+    verify: verify.yml
+verifier:
+  name: ansible
