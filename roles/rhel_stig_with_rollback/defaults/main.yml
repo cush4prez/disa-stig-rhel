@@ -2,6 +2,11 @@
 # rhel_stig_with_rollback role default variables
 # All variables prefixed with rhel_stig_with_rollback_ per Ansible best practices
 
+# Tailoring configuration
+# Set to organization name to load custom STIG variables from tailoring/<profile>/
+# Leave empty or undefined to use default STIG values
+rhel_stig_with_rollback_tailoring_profile: ""
+
 # Backup configuration
 rhel_stig_with_rollback_enable_auto_backup: true
 rhel_stig_with_rollback_backup_root: "/opt/stig_backups"

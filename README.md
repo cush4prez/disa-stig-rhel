@@ -6,6 +6,7 @@ Ansible automation for applying DISA STIG hardening to RHEL 8/9/10 systems with 
 
 - ✅ **Selective or Full STIG Auditing** - Audit specific rules or all rules
 - ✅ **Ansible-based Remediation** - Native Ansible tasks (not bash scripts)
+- ✅ **Organization Tailoring** - Customize STIG variables for your organization
 - ✅ **Automatic Backup** - Pre-hardening snapshots with disaster recovery
 - ✅ **Intelligent Rollback** - Auto-rollback on operational failures
 - ✅ **AAP 2.7 Integration** - Survey-based configuration for easy deployment
@@ -108,6 +109,35 @@ rhel_stig_with_rollback_stig_rules_to_apply: []
 
 See [docs/SURVEY_CONFIGURATION.md](docs/SURVEY_CONFIGURATION.md) for complete guide.
 
+## Organization Tailoring
+
+**New Feature:** Customize STIG security control variables for your organization.
+
+### Quick Example
+
+```bash
+# Create your organization's tailoring profile
+mkdir -p tailoring/myorg
+cp tailoring/example_tailoring.yml tailoring/myorg/common.yml
+
+# Edit with your values
+vim tailoring/myorg/common.yml
+
+# Apply with tailoring
+ansible-playbook -i inventory playbooks/rhel_stig_with_rollback.yml \
+  -e rhel_stig_with_rollback_tailoring_profile=myorg
+```
+
+### Common Tailoring Variables
+
+- `var_password_pam_minlen` - Password length requirement
+- `var_accounts_tmout` - Session timeout (seconds)
+- `var_accounts_passwords_pam_faillock_deny` - Failed login attempts
+- `sshd_idle_timeout_value` - SSH idle timeout
+- `var_auditd_max_log_file` - Audit log size
+
+See [docs/TAILORING_GUIDE.md](docs/TAILORING_GUIDE.md) for complete documentation.
+
 ## Role Variables
 
 ### Core Settings
@@ -117,6 +147,12 @@ See [docs/SURVEY_CONFIGURATION.md](docs/SURVEY_CONFIGURATION.md) for complete gu
 | `rhel_stig_with_rollback_apply_remediations` | `true` | Apply remediations after audit |
 | `rhel_stig_with_rollback_enable_auto_backup` | `true` | Create pre-hardening backup |
 | `rhel_stig_with_rollback_auto_rollback_on_failure` | `true` | Auto-rollback on verification failure |
+
+### Tailoring Settings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `rhel_stig_with_rollback_tailoring_profile` | `""` | Organization tailoring profile (empty = defaults) |
 
 ### Selective STIG Settings
 
@@ -140,6 +176,7 @@ See `roles/rhel_stig_with_rollback/defaults/main.yml` for all variables.
 
 - **[AAP_COMPLETE_GUIDE.md](docs/AAP_COMPLETE_GUIDE.md)** - Complete AAP 2.7 setup and usage
 - **[SURVEY_CONFIGURATION.md](docs/SURVEY_CONFIGURATION.md)** - Survey setup and selective STIG workflow
+- **[TAILORING_GUIDE.md](docs/TAILORING_GUIDE.md)** - Organization-specific STIG variable customization
 - **[TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** - Common issues and solutions
 - **[DISASTER_RECOVERY.md](docs/DISASTER_RECOVERY.md)** - Emergency recovery procedures
 
@@ -193,6 +230,12 @@ ansible-playbook -i inventory playbooks/emergency_restore_from_controller.yml \
 .
 ├── ansible.cfg                   # Ansible configuration
 ├── inventory                     # Default inventory
+├── tailoring/                    # Organization-specific STIG variables
+│   ├── README.md                 # Tailoring documentation
+│   ├── example_tailoring.yml     # Example template
+│   └── <org_name>/               # Your organization's profiles
+│       ├── common.yml            # Variables for all RHEL versions
+│       └── rhel{8,9,10}.yml     # Version-specific overrides
 ├── playbooks/                    # All playbooks
 │   ├── rhel_stig_with_rollback.yml              # Main (AAP compatible)
 │   ├── rhel_stig_with_rollback_interactive.yml  # Interactive CLI

@@ -27,6 +27,18 @@
       "new_question": true
     },
     {
+      "question_name": "Organization Tailoring Profile",
+      "question_description": "Specify organization tailoring profile name (leave empty for default STIG values). Example: myorg, production, development",
+      "required": false,
+      "type": "text",
+      "variable": "rhel_stig_with_rollback_tailoring_profile",
+      "min": 0,
+      "max": 64,
+      "default": "",
+      "choices": "",
+      "new_question": true
+    },
+    {
       "question_name": "Apply Remediations",
       "question_description": "Should remediations be applied automatically?",
       "required": true,

@@ -6,6 +6,13 @@
 # =============================
 # Note: Variables for the rhel_stig_with_rollback role are prefixed
 
+# Tailoring Profile
+# =================
+# Specify organization-specific tailoring profile for custom STIG variables
+# Set to your organization name to load from tailoring/<profile>/
+# Leave empty to use default STIG values
+rhel_stig_with_rollback_tailoring_profile: ""
+
 # Enable/disable automatic backup before hardening
 rhel_stig_with_rollback_enable_auto_backup: true
 

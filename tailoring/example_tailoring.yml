@@ -1,0 +1,178 @@
+---
+# Example STIG Tailoring File
+# ============================
+# This is a template showing common STIG variables that organizations customize.
+# Copy this to tailoring/<your_org>/common.yml and customize for your needs.
+
+# Organization: Example Organization
+# Created: 2026-11-03
+# Approved By: Security Team
+# Review Date: 2027-02-03
+# Compliance Framework: NIST 800-53, DISA STIG
+
+# PASSWORD POLICIES
+# =================
+# Controls password complexity and requirements
+# Reference: STIG V-230221 through V-230231
+
+var_password_pam_minlen: 15                    # Minimum password length (default: 15)
+                                               # Set higher for high-security environments
+
+var_password_pam_dcredit: -1                   # Required digit characters (negative = minimum required)
+                                               # -1 = at least 1 digit required
+
+var_password_pam_ucredit: -1                   # Required uppercase characters
+                                               # -1 = at least 1 uppercase required
+
+var_password_pam_lcredit: -1                   # Required lowercase characters
+                                               # -1 = at least 1 lowercase required
+
+var_password_pam_ocredit: -1                   # Required special characters
+                                               # -1 = at least 1 special character required
+
+var_password_pam_difok: 8                      # Characters different from previous password
+                                               # Higher = more change required
+
+var_password_pam_maxrepeat: 3                  # Maximum consecutive repeated characters
+                                               # Prevents passwords like "aaa111"
+
+var_password_pam_minclass: 4                   # Minimum character classes required
+                                               # Classes: upper, lower, digit, special
+
+var_password_pam_maxclassrepeat: 4             # Max consecutive characters from same class
+
+var_password_pam_unix_remember: 5              # Number of previous passwords remembered
+                                               # Prevents password reuse
+
+# ACCOUNT LOCKOUT
+# ===============
+# Controls account lockout after failed login attempts
+# Reference: STIG V-230343, V-230344, V-230345
+
+var_accounts_passwords_pam_faillock_deny: 3    # Maximum failed login attempts
+                                               # Lock account after this many failures
+
+var_accounts_passwords_pam_faillock_unlock_time: 900  # Account lockout duration (seconds)
+                                                      # 900 = 15 minutes
+
+var_accounts_passwords_pam_faillock_fail_interval: 900  # Failed attempt window (seconds)
+                                                        # Reset counter after this interval
+
+# SESSION MANAGEMENT
+# ==================
+# Controls session timeouts and idle disconnection
+# Reference: STIG V-230346, V-230347
+
+var_accounts_tmout: 600                        # Shell session timeout (seconds)
+                                               # 600 = 10 minutes of inactivity
+
+sshd_idle_timeout_value: 300                   # SSH idle timeout (seconds)
+                                               # 300 = 5 minutes
+
+var_sshd_set_keepalive: 0                      # SSH keepalive message count
+                                               # 0 = disabled
+
+# AUDIT CONFIGURATION
+# ===================
+# Controls audit logging behavior and thresholds
+# Reference: STIG V-230401 through V-230411
+
+var_auditd_space_left: 25                      # Percent disk space for alert
+                                               # Alert when audit partition has 25% left
+
+var_auditd_space_left_action: email            # Action when space_left threshold reached
+                                               # Options: ignore, syslog, email, suspend, halt
+
+var_auditd_admin_space_left: 10                # Percent for admin alert
+                                               # More urgent alert at 10% remaining
+
+var_auditd_admin_space_left_action: halt       # Action at admin threshold
+                                               # halt = stop system (most secure)
+
+var_auditd_max_log_file: 100                   # Maximum audit log file size (MB)
+
+var_auditd_max_log_file_action: rotate         # Action when log file reaches max size
+                                               # Options: ignore, syslog, suspend, rotate, keep_logs
+
+var_auditd_num_logs: 10                        # Number of rotated audit logs to keep
+
+var_auditd_action_mail_acct: root              # Email recipient for audit alerts
+
+# FILE PERMISSIONS
+# ================
+# Controls default file and directory permissions
+# Reference: STIG V-230258
+
+var_accounts_user_umask: '077'                 # Default user file creation mask
+                                               # 077 = owner only (most restrictive)
+                                               # 027 = owner + group read
+                                               # 022 = owner + group/other read
+
+# CRYPTOGRAPHY
+# ============
+# Controls system-wide cryptographic policies
+# Reference: STIG V-230223, V-230224, V-230225
+
+var_system_crypto_policy: "FIPS"               # System cryptographic policy
+                                               # Options: DEFAULT, FIPS, FUTURE, FIPS:OSPP
+                                               # FIPS = Federal compliance
+                                               # FIPS:OSPP = FIPS + OSPP requirements
+
+# NETWORK SECURITY
+# ================
+# Controls firewall and network security settings
+# Reference: STIG V-230518, V-230519
+
+firewalld_default_zone: public                 # Default firewall zone
+                                               # Options: drop, block, public, external, internal, dmz, work, home, trusted
+
+# SSH CONFIGURATION
+# =================
+# Additional SSH hardening variables
+# Reference: STIG V-230288 through V-230296
+
+var_sshd_disable_empty_passwords: true         # Disable empty password authentication
+var_sshd_disable_root_login: true              # Disable root SSH login
+var_sshd_disable_gssapi_auth: true             # Disable GSSAPI authentication
+var_sshd_disable_kerb_auth: true               # Disable Kerberos authentication
+var_sshd_disable_compression: true             # Disable SSH compression
+var_sshd_set_max_auth_tries: 4                 # Maximum authentication attempts per connection
+
+# KERNEL PARAMETERS
+# =================
+# Sysctl kernel security parameters
+# Reference: STIG V-230520 through V-230530
+
+# These are typically set automatically by STIG, but can be overridden
+# Uncomment to customize:
+
+# sysctl_kernel_exec_shield: 1                 # Enable ExecShield
+# sysctl_kernel_randomize_va_space: 2          # Enable ASLR
+# sysctl_net_ipv4_conf_all_accept_source_route: 0  # Disable source routing
+# sysctl_net_ipv4_conf_all_accept_redirects: 0     # Disable ICMP redirects
+# sysctl_net_ipv4_conf_all_send_redirects: 0       # Disable sending redirects
+# sysctl_net_ipv4_icmp_echo_ignore_broadcasts: 1   # Ignore broadcast pings
+# sysctl_net_ipv4_tcp_syncookies: 1                # Enable SYN cookies
+
+# ADDITIONAL ORGANIZATION-SPECIFIC VARIABLES
+# ===========================================
+# Add your organization's custom variables below
+# Consult your security team and compliance requirements
+
+# Example: Custom banner text
+# var_sshd_banner_text: "AUTHORIZED USE ONLY - Company XYZ"
+
+# Example: Custom audit rules
+# auditd_custom_rules:
+#   - "-w /etc/sudoers -p wa -k actions"
+#   - "-w /etc/passwd -p wa -k identity"
+
+# NOTES FOR YOUR ORGANIZATION
+# ============================
+# Document why specific values were chosen:
+#
+# 1. Password length set to 15 based on NIST 800-63B recommendations
+# 2. Account lockout set to 3 attempts per security policy SEC-001
+# 3. Session timeout set to 10 minutes per compliance requirement COMP-045
+# 4. Audit logs kept for 90 days minimum per retention policy RET-003
+# 5. FIPS mode required for all production systems per policy CRYPTO-001
