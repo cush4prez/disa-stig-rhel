@@ -13,6 +13,14 @@
 # Leave empty to use default STIG values
 rhel_stig_with_rollback_tailoring_profile: ""
 
+# Native Ansible Parsing
+# =======================
+# Use native Ansible modules (community.general.xml) instead of Python scripts
+# Benefits: Better security, no script distribution, easier maintenance
+# Requires: community.general collection >= 8.0.0
+# Set to false to use legacy Python scripts
+rhel_stig_with_rollback_use_native_parsing: true
+
 # Enable/disable automatic backup before hardening
 rhel_stig_with_rollback_enable_auto_backup: true
 

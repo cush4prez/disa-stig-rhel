@@ -6,6 +6,7 @@ Ansible automation for applying DISA STIG hardening to RHEL 8/9/10 systems with 
 
 - ✅ **Selective or Full STIG Auditing** - Audit specific rules or all rules
 - ✅ **Ansible-based Remediation** - Native Ansible tasks (not bash scripts)
+- ✅ **Native XML Parsing** - No Python scripts, pure Ansible using community.general.xml
 - ✅ **Organization Tailoring** - Customize STIG variables for your organization
 - ✅ **Automatic Backup** - Pre-hardening snapshots with disaster recovery
 - ✅ **Intelligent Rollback** - Auto-rollback on operational failures
@@ -26,10 +27,10 @@ Prompts you for:
 - Whether to apply remediations
 - Auto-rollback settings
 
-### Option 2: Using the Role
+### Option 2: Using the Role (Recommended)
 
 ```bash
-ansible-playbook -i inventory playbooks/rhel_stig_with_rollback.yml
+ansible-playbook -i inventory playbooks/site.yml
 ```
 
 Or create your own playbook:
@@ -49,7 +50,7 @@ Or create your own playbook:
 
 1. **Create Project** pointing to this repository
 2. **Import Survey** from `docs/aap_survey_configuration.json`
-3. **Create Job Template** with `playbooks/rhel_stig_with_rollback.yml`
+3. **Create Job Template** with `playbooks/site.yml`
 4. **Enable Survey** on the job template
 5. **Launch** and fill out the survey form
 
@@ -138,6 +139,28 @@ ansible-playbook -i inventory playbooks/rhel_stig_with_rollback.yml \
 
 See [docs/TAILORING_GUIDE.md](docs/TAILORING_GUIDE.md) for complete documentation.
 
+## Native Ansible Parsing
+
+**New Feature:** XML parsing using native Ansible modules instead of Python scripts.
+
+### Benefits
+
+- 🔒 **Better Security** - No script execution on target hosts
+- 🚀 **Easier Maintenance** - Pure Ansible, no Python expertise required
+- ✅ **Built-in Idempotency** - Declarative approach with Ansible's error handling
+- 📦 **No Script Distribution** - Reduces attack surface and deployment complexity
+
+### Usage
+
+Native parsing is enabled by default. To use legacy Python scripts:
+
+```yaml
+# group_vars/all.yml or extra vars
+rhel_stig_with_rollback_use_native_parsing: false
+```
+
+See [docs/NATIVE_ANSIBLE_MIGRATION.md](docs/NATIVE_ANSIBLE_MIGRATION.md) for complete details.
+
 ## Role Variables
 
 ### Core Settings
@@ -153,6 +176,12 @@ See [docs/TAILORING_GUIDE.md](docs/TAILORING_GUIDE.md) for complete documentatio
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `rhel_stig_with_rollback_tailoring_profile` | `""` | Organization tailoring profile (empty = defaults) |
+
+### Parsing Method
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `rhel_stig_with_rollback_use_native_parsing` | `true` | Use native Ansible XML parsing (recommended) |
 
 ### Selective STIG Settings
 
@@ -177,11 +206,13 @@ See `roles/rhel_stig_with_rollback/defaults/main.yml` for all variables.
 - **[AAP_COMPLETE_GUIDE.md](docs/AAP_COMPLETE_GUIDE.md)** - Complete AAP 2.7 setup and usage
 - **[SURVEY_CONFIGURATION.md](docs/SURVEY_CONFIGURATION.md)** - Survey setup and selective STIG workflow
 - **[TAILORING_GUIDE.md](docs/TAILORING_GUIDE.md)** - Organization-specific STIG variable customization
+- **[NATIVE_ANSIBLE_MIGRATION.md](docs/NATIVE_ANSIBLE_MIGRATION.md)** - Native Ansible XML parsing (recommended)
 - **[TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** - Common issues and solutions
 - **[DISASTER_RECOVERY.md](docs/DISASTER_RECOVERY.md)** - Emergency recovery procedures
 
 ### Reference Guides
 
+- **[PLAYBOOK_USAGE.md](docs/PLAYBOOK_USAGE.md)** - Which playbooks to use (IMPORTANT)
 - **[PLAYBOOK_REFERENCE.md](docs/PLAYBOOK_REFERENCE.md)** - Complete playbook descriptions
 - **[ROLE_DOCUMENTATION.md](docs/ROLE_DOCUMENTATION.md)** - Role architecture and phases
 
@@ -191,7 +222,13 @@ See `roles/rhel_stig_with_rollback/defaults/main.yml` for all variables.
 - openscap-scanner
 - scap-security-guide
 - Ansible 2.9+
-- Python 3.6+
+- Ansible Collections:
+  - `community.general` >= 8.0.0 (for native XML parsing)
+
+Install collections:
+```bash
+ansible-galaxy collection install -r requirements.yml
+```
 
 The role automatically installs missing SCAP packages.
 
