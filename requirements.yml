@@ -1,0 +1,9 @@
+---
+# Ansible Collections Requirements
+# Install with: ansible-galaxy collection install -r requirements.yml
+
+collections:
+  # Required for XML parsing (native Ansible approach)
+  # Used in: parse_oscap_score.yml, filter_audit_results.yml, parse_oscap_failures.yml
+  - name: community.general
+    version: ">=8.0.0"

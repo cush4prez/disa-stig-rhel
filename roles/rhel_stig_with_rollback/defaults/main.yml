@@ -7,6 +7,12 @@
 # Leave empty or undefined to use default STIG values
 rhel_stig_with_rollback_tailoring_profile: ""
 
+# Native Ansible parsing
+# Use native Ansible modules instead of Python scripts for XML parsing
+# Requires: community.general collection >= 8.0.0
+# Benefits: Better security, no script distribution, easier maintenance
+rhel_stig_with_rollback_use_native_parsing: true
+
 # Backup configuration
 rhel_stig_with_rollback_enable_auto_backup: true
 rhel_stig_with_rollback_backup_root: "/opt/stig_backups"

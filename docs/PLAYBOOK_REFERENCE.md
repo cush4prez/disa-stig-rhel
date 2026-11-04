@@ -55,6 +55,7 @@ ansible-playbook -i inventory playbooks/rhel_stig_with_rollback.yml \
 |----------|---------|-------------|
 | `rhel_stig_with_rollback_stig_rules_to_apply` | `[]` | List of rule IDs (empty = full) |
 | `rhel_stig_with_rollback_tailoring_profile` | `""` | Organization tailoring profile (empty = defaults) |
+| `rhel_stig_with_rollback_use_native_parsing` | `true` | Use native Ansible XML parsing (recommended) |
 | `rhel_stig_with_rollback_apply_remediations` | `true` | Apply fixes |
 | `rhel_stig_with_rollback_auto_rollback_on_failure` | `true` | Auto-rollback |
 | `rhel_stig_with_rollback_enable_auto_backup` | `true` | Create backup |

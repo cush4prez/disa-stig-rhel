@@ -49,22 +49,40 @@
     path: "{{ rhel_stig_with_rollback_stig_audit_dir }}/baseline_{{ rhel_stig_with_rollback_backup_timestamp }}.xml"
   register: rhel_stig_with_rollback_baseline_xml_stat
 
-- name: Copy parse script to work directory
-  ansible.builtin.copy:
-    src: parse_oscap_score.py
-    dest: "{{ rhel_stig_with_rollback_stig_work_dir }}/parse_oscap_score.py"
-    mode: '0755'
-    owner: root
-    group: root
-  when: rhel_stig_with_rollback_baseline_xml_stat.stat.exists
+- name: Parse baseline audit results (native Ansible)
+  when:
+    - rhel_stig_with_rollback_use_native_parsing | default(true)
+    - rhel_stig_with_rollback_baseline_xml_stat.stat.exists
+  block:
+    - name: Parse OSCAP score with native Ansible
+      ansible.builtin.include_tasks: parse_oscap_score.yml
+      vars:
+        oscap_xml_file: "{{ rhel_stig_with_rollback_stig_audit_dir }}/baseline_{{ rhel_stig_with_rollback_backup_timestamp }}.xml"
 
-- name: Parse baseline audit results
-  ansible.builtin.command: >
-    {{ rhel_stig_with_rollback_stig_work_dir }}/parse_oscap_score.py
-    {{ rhel_stig_with_rollback_stig_audit_dir }}/baseline_{{ rhel_stig_with_rollback_backup_timestamp }}.xml
-  register: rhel_stig_with_rollback_baseline_score
-  changed_when: false
-  when: rhel_stig_with_rollback_baseline_xml_stat.stat.exists
+    - name: Set baseline score variable (native)
+      ansible.builtin.set_fact:
+        rhel_stig_with_rollback_baseline_score:
+          stdout: "{{ oscap_compliance_score }}"
+
+- name: Parse baseline audit results (Python script - deprecated)
+  when:
+    - not (rhel_stig_with_rollback_use_native_parsing | default(true))
+    - rhel_stig_with_rollback_baseline_xml_stat.stat.exists
+  block:
+    - name: Copy parse script to work directory
+      ansible.builtin.copy:
+        src: parse_oscap_score.py
+        dest: "{{ rhel_stig_with_rollback_stig_work_dir }}/parse_oscap_score.py"
+        mode: '0755'
+        owner: root
+        group: root
+
+    - name: Parse baseline audit results with Python
+      ansible.builtin.command: >
+        {{ rhel_stig_with_rollback_stig_work_dir }}/parse_oscap_score.py
+        {{ rhel_stig_with_rollback_stig_audit_dir }}/baseline_{{ rhel_stig_with_rollback_backup_timestamp }}.xml
+      register: rhel_stig_with_rollback_baseline_score
+      changed_when: false
 
 - name: Set default baseline score if XML not found
   ansible.builtin.set_fact:
@@ -72,8 +90,25 @@
       stdout: '0.0'
   when: not rhel_stig_with_rollback_baseline_xml_stat.stat.exists
 
-- name: Filter audit results for selected rules (selective mode)
-  when: rhel_stig_with_rollback_selective_mode
+- name: Filter audit results for selected rules (selective mode - native Ansible)
+  when:
+    - rhel_stig_with_rollback_selective_mode
+    - rhel_stig_with_rollback_use_native_parsing | default(true)
+  block:
+    - name: Filter audit with native Ansible
+      ansible.builtin.include_tasks: filter_audit_results.yml
+      vars:
+        oscap_xml_file: "{{ rhel_stig_with_rollback_stig_audit_dir }}/baseline_{{ rhel_stig_with_rollback_backup_timestamp }}.xml"
+        stig_rules_to_filter: "{{ rhel_stig_with_rollback_stig_rules_to_apply }}"
+
+    - name: Map native results to role variable
+      ansible.builtin.set_fact:
+        rhel_stig_with_rollback_audit_filter_data: "{{ oscap_filtered_results }}"
+
+- name: Filter audit results for selected rules (selective mode - Python script)
+  when:
+    - rhel_stig_with_rollback_selective_mode
+    - not (rhel_stig_with_rollback_use_native_parsing | default(true))
   block:
     - name: Copy filter audit script
       ansible.builtin.copy:
