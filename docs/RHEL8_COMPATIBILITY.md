@@ -51,8 +51,8 @@ Once `python3-lxml` is installed, native Ansible parsing works perfectly on RHEL
 
 ```yaml
 # Phase 1: Ensure dependencies
-- Check if lxml available: python3 -c "import lxml.etree"
-- If missing: Install python3-lxml package  
+- Check if lxml available: python39 -c "import lxml.etree"
+- If missing: Install python39-lxml package  
 - If install succeeds: Use native Ansible parsing
 - If install fails: Fall back to Python scripts
 ```
@@ -92,9 +92,9 @@ rhel_stig_with_rollback_use_native_parsing: false
 
 ## Expected Behavior by RHEL Version
 
-### RHEL 8 (Python 3.6)
+### RHEL 8 (Python 3.9)
 1. Check lxml → Usually missing
-2. **Install python3-lxml** → Usually succeeds
+2. **Install python39-lxml** → Usually succeeds
 3. Use native Ansible parsing ✅
 
 Only falls back to Python scripts if lxml install fails.
@@ -169,7 +169,7 @@ ok: [rhel8] =>
 
 **Solution**: Manually install:
 ```bash
-dnf install python3-lxml
+dnf install python39-lxml
 ```
 
 Then re-run the playbook.
