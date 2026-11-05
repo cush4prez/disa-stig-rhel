@@ -9,9 +9,19 @@ rhel_stig_with_rollback_tailoring_profile: ""
 
 # Native Ansible parsing
 # Use native Ansible modules instead of Python scripts for XML parsing
-# Requires: community.general collection >= 8.0.0
+# Requires: community.general collection >= 8.0.0 and python3-lxml
 # Benefits: Better security, no script distribution, easier maintenance
 rhel_stig_with_rollback_use_native_parsing: true
+
+# Auto-detect Python compatibility for native parsing
+# If true, automatically falls back to Python scripts if lxml is unavailable
+# If false, uses the value of use_native_parsing regardless of dependencies
+rhel_stig_with_rollback_auto_detect_python: true
+
+# Auto-install dependencies (python3-lxml) for native parsing
+# If true, automatically installs python3-lxml if missing
+# If false, only detects and falls back to Python scripts
+rhel_stig_with_rollback_auto_install_deps: true
 
 # Backup configuration
 rhel_stig_with_rollback_enable_auto_backup: true

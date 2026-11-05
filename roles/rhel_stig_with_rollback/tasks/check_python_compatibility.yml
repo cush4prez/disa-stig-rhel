@@ -1,0 +1,67 @@
+---
+# Check Python compatibility for native Ansible parsing
+# community.general.xml requires lxml library
+
+- name: Detect Python version
+  ansible.builtin.command: python3 --version
+  register: rhel_stig_with_rollback_python_version_output
+  changed_when: false
+
+- name: Parse Python version
+  ansible.builtin.set_fact:
+    rhel_stig_with_rollback_python_version: "{{ rhel_stig_with_rollback_python_version_output.stdout | regex_search('\\d+\\.\\d+') }}"
+
+- name: Display Python version
+  ansible.builtin.debug:
+    msg: "Python version detected: {{ rhel_stig_with_rollback_python_version }}"
+
+- name: Check if lxml is available
+  ansible.builtin.command: python3 -c "import lxml.etree"
+  register: rhel_stig_with_rollback_lxml_check
+  changed_when: false
+  failed_when: false
+
+- name: Install python3-lxml if missing and auto-install enabled
+  ansible.builtin.package:
+    name: python3-lxml
+    state: present
+  when:
+    - rhel_stig_with_rollback_lxml_check.rc != 0
+    - rhel_stig_with_rollback_auto_install_deps | default(true)
+  register: rhel_stig_with_rollback_lxml_install
+
+- name: Recheck lxml availability after install attempt
+  ansible.builtin.command: python3 -c "import lxml.etree"
+  register: rhel_stig_with_rollback_lxml_recheck
+  changed_when: false
+  failed_when: false
+
+- name: Determine if native parsing is possible
+  ansible.builtin.set_fact:
+    rhel_stig_with_rollback_native_parsing_available: >-
+      {{ rhel_stig_with_rollback_lxml_recheck.rc == 0 }}
+
+- name: Display lxml status
+  ansible.builtin.debug:
+    msg: >-
+      lxml library: {{ 'Available' if rhel_stig_with_rollback_native_parsing_available else 'Not available' }}
+
+- name: Auto-disable native parsing if lxml unavailable
+  ansible.builtin.set_fact:
+    rhel_stig_with_rollback_use_native_parsing: false
+  when:
+    - not rhel_stig_with_rollback_native_parsing_available
+    - rhel_stig_with_rollback_auto_detect_python | default(true)
+
+- name: Warn if native parsing unavailable
+  ansible.builtin.debug:
+    msg:
+      - "WARNING: lxml library not available"
+      - "Falling back to Python scripts for XML parsing"
+      - "To enable native parsing: dnf install python3-lxml"
+  when: not rhel_stig_with_rollback_native_parsing_available
+
+- name: Display parsing method
+  ansible.builtin.debug:
+    msg: >-
+      Parsing method: {{ 'Native Ansible (community.general.xml)' if rhel_stig_with_rollback_use_native_parsing else 'Python scripts (legacy)' }}

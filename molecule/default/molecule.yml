@@ -1,6 +1,8 @@
 ---
 dependency:
   name: galaxy
+  options:
+    requirements-file: ../../requirements.yml
 driver:
   name: podman
 platforms:
@@ -37,6 +39,13 @@ provisioner:
       all:
         ansible_python_interpreter: /usr/bin/python3
         ansible_become: false
+        # Test RHEL 8 compatibility
+        rhel_stig_with_rollback_use_native_parsing: true
+        rhel_stig_with_rollback_auto_install_deps: true
+        rhel_stig_with_rollback_auto_detect_python: true
+        rhel_stig_with_rollback_apply_remediations: false
+        rhel_stig_with_rollback_enable_auto_backup: true
+        rhel_stig_with_rollback_fetch_to_controller: false
   config_options:
     defaults:
       callbacks_enabled: profile_tasks,timer

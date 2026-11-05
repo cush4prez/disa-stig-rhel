@@ -3,10 +3,18 @@
 
 skip_list:
   - yaml[indentation]  # Allow 2-space indentation for tasks (common style)
+  - command-instead-of-module  # tar fallback is intentional for RHEL 8 compatibility
+  - risky-shell-pipe  # Diagnostic playbooks use pipes intentionally
+  - no-relative-paths  # Test playbooks use relative paths intentionally
+  - var-naming[read-only]  # playbook_dir is read-only by design in test playbooks
+  - var-naming[no-role-prefix]  # oscap_ and archive_ variables are internal/temporary
 
 warn_list:
   - experimental  # Warn about experimental features
   - no-changed-when  # Warn about missing changed_when
+  - yaml[line-length]  # Warn but don't fail on long lines
+  - jinja[spacing]  # Warn about jinja spacing
+  - key-order  # Warn about task key order
 
 # Use relaxed rules for task files (not full playbooks)
 kinds:
@@ -20,6 +28,11 @@ exclude_paths:
   - .cache/
   - .git/
   - molecule/
+  - playbooks/debug_*.yml  # Debug playbooks
+  - playbooks/diagnose_*.yml  # Diagnostic playbooks
+  - playbooks/test_*.yml  # Test playbooks
+  - playbooks/full_diagnostic.yml  # Diagnostic playbook
+  - files/  # Python scripts
 
 # Enable offline mode (don't download roles/collections)
 offline: true

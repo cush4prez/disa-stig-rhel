@@ -1,4 +1,7 @@
 {
+  "_comment": "AAP 2.7 does NOT support importing survey JSON files. This file is provided as a REFERENCE ONLY for manual survey creation through the AAP GUI. See AAP_COMPLETE_GUIDE.md for step-by-step instructions.",
+  "_usage": "This JSON shows the survey structure but must be manually recreated in AAP GUI: Resources → Templates → [Template Name] → Survey → Add",
+
   "name": "DISA STIG Configuration Survey",
   "description": "Configure STIG audit and remediation options",
   "spec": [
@@ -12,11 +15,12 @@
       "max": null,
       "default": "full",
       "choices": "full\nselective",
-      "new_question": true
+      "new_question": true,
+      "_manual_setup_note": "In AAP GUI: Answer type = 'Multiple Choice (single select)', Options = 'full' and 'selective' on separate lines"
     },
     {
-      "question_name": "STIG Rules to Audit",
-      "question_description": "Enter comma-separated list of STIG rule IDs (e.g., sysctl_crypto_fips_enabled,audit_rules_login_events). Only used if 'selective' mode is chosen. Leave blank for full audit.",
+      "question_name": "STIG Rules to Audit (comma-separated, for selective mode)",
+      "question_description": "List specific STIG rules to audit. Only used when Audit Mode is 'selective'. Example: sysctl_crypto_fips_enabled,audit_rules_login_events,sshd_set_idle_timeout",
       "required": false,
       "type": "textarea",
       "variable": "stig_rules_input",
@@ -24,23 +28,12 @@
       "max": 4096,
       "default": "",
       "choices": "",
-      "new_question": true
+      "new_question": true,
+      "_manual_setup_note": "In AAP GUI: Answer type = 'Textarea'"
     },
     {
-      "question_name": "Organization Tailoring Profile",
-      "question_description": "Specify organization tailoring profile name (leave empty for default STIG values). Example: myorg, production, development",
-      "required": false,
-      "type": "text",
-      "variable": "rhel_stig_with_rollback_tailoring_profile",
-      "min": 0,
-      "max": 64,
-      "default": "",
-      "choices": "",
-      "new_question": true
-    },
-    {
-      "question_name": "Apply Remediations",
-      "question_description": "Should remediations be applied automatically?",
+      "question_name": "Apply Remediations?",
+      "question_description": "Apply fixes to failed STIG rules? If false, performs audit only.",
       "required": true,
       "type": "multiplechoice",
       "variable": "rhel_stig_with_rollback_apply_remediations",
@@ -48,11 +41,12 @@
       "max": null,
       "default": "true",
       "choices": "true\nfalse",
-      "new_question": true
+      "new_question": true,
+      "_manual_setup_note": "In AAP GUI: Answer type = 'Multiple Choice (single select)', Options = 'true' and 'false' on separate lines"
     },
     {
-      "question_name": "Auto Rollback on Failure",
-      "question_description": "Automatically rollback changes if operational verification fails?",
+      "question_name": "Auto Rollback on Failure?",
+      "question_description": "Automatically restore from backup if system verification fails after remediation?",
       "required": true,
       "type": "multiplechoice",
       "variable": "rhel_stig_with_rollback_auto_rollback_on_failure",
@@ -60,7 +54,21 @@
       "max": null,
       "default": "true",
       "choices": "true\nfalse",
-      "new_question": true
+      "new_question": true,
+      "_manual_setup_note": "In AAP GUI: Answer type = 'Multiple Choice (single select)', Options = 'true' and 'false' on separate lines"
+    },
+    {
+      "question_name": "Tailoring Profile (optional)",
+      "question_description": "Organization-specific tailoring profile name. Leave blank for DISA defaults. Example: myorg",
+      "required": false,
+      "type": "text",
+      "variable": "rhel_stig_with_rollback_tailoring_profile",
+      "min": 0,
+      "max": 64,
+      "default": "",
+      "choices": "",
+      "new_question": true,
+      "_manual_setup_note": "In AAP GUI: Answer type = 'Text'"
     }
   ]
 }
