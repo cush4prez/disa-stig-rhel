@@ -486,6 +486,12 @@ Keep inventory up-to-date automatically:
 
 This is the main production template with GUI survey for easy configuration.
 
+**IMPORTANT**: Use `site.yml` (role-based approach) instead of `rhel_stig_with_rollback.yml`:
+- ✅ `site.yml` - Clean role invocation (recommended)
+- ❌ `rhel_stig_with_rollback.yml` - Legacy playbook with duplicate post_tasks
+
+See [PLAYBOOK_USAGE.md](../PLAYBOOK_USAGE.md) for details.
+
 1. **Resources → Templates → Add → Add job template**
 2. Configure **Details**:
    - **Name**: `STIG - Full Hardening`
@@ -493,7 +499,7 @@ This is the main production template with GUI survey for easy configuration.
    - **Inventory**: `RHEL Servers`
    - **Project**: `RHEL DISA STIG`
    - **Execution Environment**: Select your EE
-   - **Playbook**: `playbooks/rhel_stig_with_rollback.yml`
+   - **Playbook**: `playbooks/site.yml` ⭐ **Use this, not rhel_stig_with_rollback.yml**
    - **Credentials**: 
      - **Type**: Machine
      - Select credential with sudo access
@@ -504,9 +510,12 @@ This is the main production template with GUI survey for easy configuration.
      rhel_stig_with_rollback_controller_backup_dir: /var/lib/awx/projects/stig_backups
      rhel_stig_with_rollback_fetch_to_controller: true
      
-     # Native parsing (recommended)
+     # Native parsing (enabled by default in role)
      rhel_stig_with_rollback_use_native_parsing: true
      rhel_stig_with_rollback_auto_install_deps: true
+     
+     # Enable auto-detect for RHEL 8 compatibility
+     rhel_stig_with_rollback_auto_detect_python: true
      ```
    - **Options**:
      - ☑ Privilege Escalation
