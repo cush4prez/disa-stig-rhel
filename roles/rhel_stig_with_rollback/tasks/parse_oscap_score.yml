@@ -23,8 +23,9 @@
       ansible.builtin.slurp:
         src: "{{ oscap_xml_file }}"
       register: rhel_stig_with_rollback_oscap_xml_content
+
     - name: Display XML content
-      ansible.builtin.debug: 
+      ansible.builtin.debug:
         var: rhel_stig_with_rollback_oscap_xml_content
 
     - name: Parse XML and extract all result elements
