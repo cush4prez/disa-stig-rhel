@@ -51,7 +51,10 @@
           {{ (rhel_stig_with_rollback_oscap_results_xml.matches | default([])
           | selectattr('text', 'defined') | selectattr('text', 'equalto', 'notchecked')
           | list | length) | int }}
-        rhel_stig_with_rollback_oscap_error_count: "{{ (rhel_stig_with_rollback_oscap_results_xml.matches | default([]) | selectattr('text', 'defined') | selectattr('text', 'equalto', 'error') | list | length) | int }}"
+        rhel_stig_with_rollback_oscap_error_count: >-
+          {{ (rhel_stig_with_rollback_oscap_results_xml.matches | default([])
+          | selectattr('text', 'defined') | selectattr('text', 'equalto', 'error')
+          | list | length) | int }}
       when: rhel_stig_with_rollback_oscap_results_xml.matches is defined
 
     - name: Calculate total checked rules
@@ -60,7 +63,9 @@
 
     - name: Calculate compliance score
       ansible.builtin.set_fact:
-        rhel_stig_with_rollback_oscap_compliance_score: "{{ ((rhel_stig_with_rollback_oscap_pass_count | int / rhel_stig_with_rollback_oscap_checked_rules | int * 100) | round(2)) | string }}"
+        rhel_stig_with_rollback_oscap_compliance_score: >-
+          {{ ((rhel_stig_with_rollback_oscap_pass_count | int /
+          rhel_stig_with_rollback_oscap_checked_rules | int * 100) | round(2)) | string }}
       when: (rhel_stig_with_rollback_oscap_checked_rules | int) > 0
 
     - name: Set zero score if no rules checked
@@ -78,4 +83,6 @@
           - "  Not Checked: {{ rhel_stig_with_rollback_oscap_notchecked_count }}"
           - "  Error: {{ rhel_stig_with_rollback_oscap_error_count }}"
           - "  Checked Rules: {{ rhel_stig_with_rollback_oscap_checked_rules }}"
-          - "  Compliance: {{ rhel_stig_with_rollback_oscap_pass_count }}/{{ rhel_stig_with_rollback_oscap_checked_rules }} = {{ rhel_stig_with_rollback_oscap_compliance_score }}%"
+          - "  Compliance: {{ rhel_stig_with_rollback_oscap_pass_count }}/\
+                           {{ rhel_stig_with_rollback_oscap_checked_rules }} = \
+                           {{ rhel_stig_with_rollback_oscap_compliance_score }}%"
