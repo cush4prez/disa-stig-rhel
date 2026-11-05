@@ -130,7 +130,7 @@ podman login registry.access.redhat.com
 
 #### Python Version Issues
 
-The tests automatically install python3-lxml to ensure native parsing works on all platforms including RHEL 8 (Python 3.6).
+The tests automatically install python39-lxml to ensure native parsing works on all platforms including RHEL 8 (Python 3.6).
 
 ### Test Results Interpretation
 

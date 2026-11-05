@@ -31,7 +31,7 @@
     path: "{{ rhel_stig_with_rollback_scap_ds_path }}"
   register: rhel_stig_with_rollback_scap_stat
 
-- name: Install SCAP and python content if missing
+- name: Install SCAP content if missing
   ansible.builtin.dnf:
     name:
       - openscap-scanner

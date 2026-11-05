@@ -21,9 +21,9 @@
   changed_when: false
   failed_when: false
 
-- name: Install python3-lxml if missing and auto-install enabled
+- name: Install python39-lxml if missing and auto-install enabled
   ansible.builtin.package:
-    name: python3-lxml
+    name: python39-lxml
     state: present
   when:
     - rhel_stig_with_rollback_lxml_check.rc != 0
@@ -58,7 +58,7 @@
     msg:
       - "WARNING: lxml library not available"
       - "Falling back to Python scripts for XML parsing"
-      - "To enable native parsing: dnf install python3-lxml"
+      - "To enable native parsing: dnf install python39-lxml"
   when: not rhel_stig_with_rollback_native_parsing_available
 
 - name: Display parsing method
