@@ -49,6 +49,10 @@ rhel_stig_with_rollback_require_confirmation: true
 # Example: ['sysctl_crypto_fips_enabled', 'audit_rules_login_events']
 rhel_stig_with_rollback_stig_rules_to_apply: []
 
+# Selective mode flag (computed from stig_rules_to_apply)
+# Set automatically in phase3, but defaulted here for safety
+rhel_stig_with_rollback_selective_mode: false
+
 # Rollback configuration
 rhel_stig_with_rollback_auto_rollback_on_failure: true
 rhel_stig_with_rollback_rollback_on_critical_service_failure: true

@@ -16,14 +16,14 @@
     msg: "Python version detected: {{ rhel_stig_with_rollback_python_version }}"
 
 - name: Check if lxml is available
-  ansible.builtin.command: python3 -c "import lxml.etree"
+  ansible.builtin.command: python39 -c "import lxml.etree"
   register: rhel_stig_with_rollback_lxml_check
   changed_when: false
   failed_when: false
 
-- name: Install python3-lxml if missing and auto-install enabled
+- name: Install python39-lxml if missing and auto-install enabled
   ansible.builtin.package:
-    name: python3-lxml
+    name: python39-lxml
     state: present
   when:
     - rhel_stig_with_rollback_lxml_check.rc != 0
@@ -31,7 +31,7 @@
   register: rhel_stig_with_rollback_lxml_install
 
 - name: Recheck lxml availability after install attempt
-  ansible.builtin.command: python3 -c "import lxml.etree"
+  ansible.builtin.command: python39 -c "import lxml.etree"
   register: rhel_stig_with_rollback_lxml_recheck
   changed_when: false
   failed_when: false
@@ -58,7 +58,7 @@
     msg:
       - "WARNING: lxml library not available"
       - "Falling back to Python scripts for XML parsing"
-      - "To enable native parsing: dnf install python3-lxml"
+      - "To enable native parsing: dnf install python39-lxml"
   when: not rhel_stig_with_rollback_native_parsing_available
 
 - name: Display parsing method

@@ -24,6 +24,10 @@
         src: "{{ oscap_xml_file }}"
       register: rhel_stig_with_rollback_oscap_xml_content
 
+    - name: Display XML content
+      ansible.builtin.debug:
+        var: rhel_stig_with_rollback_oscap_xml_content
+
     - name: Parse XML and extract all result elements
       community.general.xml:
         xmlstring: "{{ rhel_stig_with_rollback_oscap_xml_content.content | b64decode }}"
@@ -31,6 +35,10 @@
         content: text
       register: rhel_stig_with_rollback_oscap_results_xml
       failed_when: false
+
+    - name: Display parse xml
+      ansible.builtin.debug:
+        var: rhel_stig_with_rollback_oscap_results_xml
 
     # cspell:ignore notapplicable notchecked rhel stig oscap selectattr equalto
     - name: Count pass/fail/not-applicable/not-checked results
