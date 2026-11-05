@@ -17,14 +17,18 @@ rhel_stig_with_rollback_tailoring_profile: ""
 # =======================
 # Use native Ansible modules (community.general.xml) instead of Python scripts
 # Benefits: Better security, no script distribution, easier maintenance
-# Requires: community.general collection >= 8.0.0 and Python >= 3.7
-# Note: RHEL 8 (Python 3.6) automatically falls back to Python scripts
+# Requires: community.general collection >= 8.0.0 and python3-lxml
+# Note: python3-lxml will be auto-installed if missing
 # Set to false to use legacy Python scripts
 rhel_stig_with_rollback_use_native_parsing: true
 
 # Auto-detect Python version compatibility
-# If true, automatically uses Python scripts on RHEL 8 (Python 3.6)
+# If true, automatically uses Python scripts if lxml unavailable
 rhel_stig_with_rollback_auto_detect_python: true
+
+# Auto-install python3-lxml dependency if missing
+# If true, installs lxml automatically to enable native parsing
+rhel_stig_with_rollback_auto_install_deps: true
 
 # Enable/disable automatic backup before hardening
 rhel_stig_with_rollback_enable_auto_backup: true

@@ -4,5 +4,17 @@
   become: true
   gather_facts: true
 
+  pre_tasks:
+    # Process AAP survey inputs (for survey-based deployments)
+    - name: Convert survey inputs to role variables (AAP 2.7)
+      ansible.builtin.set_fact:
+        rhel_stig_with_rollback_stig_rules_to_apply: >-
+          {% if stig_audit_mode is defined and (stig_audit_mode == 'selective') %}
+          {{ stig_rules_input.split(',') | map('trim') | select | list }}
+          {% else %}
+          []
+          {% endif %}
+      when: stig_audit_mode is defined
+
   roles:
     - rhel_stig_with_rollback

@@ -29,7 +29,7 @@
 
     - name: Copy parse script
       ansible.builtin.copy:
-        src: ../files/parse_oscap_score.py
+        src: "{{ playbook_dir }}/../files/parse_oscap_score.py"
         dest: "{{ test_dir }}/parse_oscap_score.py"
         mode: '0755'
 
