@@ -9,12 +9,13 @@
       - "========================================================================="
       - "Target Host            : {{ inventory_hostname }}"
       - "RHEL Version           : {{ ansible_distribution_version }}"
-      - "Baseline Compliance    : {{ rhel_stig_with_rollback_baseline_score.stdout }}%"
+      - "Baseline Compliance    : {{ rhel_stig_with_rollback_baseline_score.stdout | default('N/A') }}%"
       - >-
-        {% if rhel_stig_with_rollback_apply_remediations %}
+        {% if rhel_stig_with_rollback_apply_remediations and rhel_stig_with_rollback_post_score is defined %}
         Post-Hardening Compliance : {{ rhel_stig_with_rollback_post_score.stdout }}%{% endif %}
       - >-
-        {% if rhel_stig_with_rollback_apply_remediations %}
+        {% if rhel_stig_with_rollback_apply_remediations and rhel_stig_with_rollback_post_score is defined
+        and rhel_stig_with_rollback_baseline_score is defined %}
         Compliance Improvement : +{{ (rhel_stig_with_rollback_post_score.stdout | float -
         rhel_stig_with_rollback_baseline_score.stdout | float) | round(2) }}%{% endif %}
       - "-------------------------------------------------------------------------"
