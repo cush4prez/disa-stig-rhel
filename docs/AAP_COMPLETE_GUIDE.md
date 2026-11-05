@@ -298,14 +298,20 @@ additional_build_steps:
 
 ## Step 3: Create Inventory
 
-### Step 3.1: Create Inventory
+You can create inventory in AAP two ways:
+- **Option A**: Add hosts manually (simple, good for small deployments)
+- **Option B**: Source from project inventory file (recommended for larger deployments)
+
+### Option A: Manual Inventory (Simple)
+
+#### Step A.1: Create Inventory
 
 1. **Resources → Inventories → Add → Inventory**
 2. **Name**: `RHEL Servers`
 3. **Organization**: Your organization
 4. **Save**
 
-### Step 3.2: Add Hosts
+#### Step A.2: Add Hosts Manually
 
 1. **Hosts → Add**
 2. For each RHEL server:
@@ -316,8 +322,9 @@ additional_build_steps:
      ansible_host: 192.168.1.100
      ```
 3. **Save**
+4. Repeat for all hosts
 
-### Step 3.3: Add Groups (Optional)
+#### Step A.3: Add Groups (Optional)
 
 Create groups for different RHEL versions:
 
@@ -325,6 +332,151 @@ Create groups for different RHEL versions:
 2. **Name**: `rhel8_servers`
 3. **Save**
 4. **Hosts → Add existing host** to assign hosts to group
+
+### Option B: Source from Project (Recommended)
+
+This option automatically imports inventory from your Git repository, keeping AAP in sync with your version-controlled inventory.
+
+#### Step B.1: Create Inventory File in Project
+
+First, add an inventory file to your Git repository:
+
+```bash
+# On your workstation where you have the repo cloned
+cd /path/to/disa-stig-rhel
+
+# Create inventory directory (if not exists)
+mkdir -p inventories
+
+# Create inventory file for RHEL servers
+cat > inventories/rhel_servers.yml <<'EOF'
+---
+all:
+  children:
+    rhel_servers:
+      children:
+        rhel8_servers:
+          hosts:
+            rhel8-server-01:
+              ansible_host: 192.168.1.101
+            rhel8-server-02:
+              ansible_host: 192.168.1.102
+        rhel9_servers:
+          hosts:
+            rhel9-server-01:
+              ansible_host: 192.168.1.201
+            rhel9-server-02:
+              ansible_host: 192.168.1.202
+      vars:
+        # Common variables for all RHEL servers
+        ansible_user: ansible
+        ansible_become: true
+EOF
+
+# Commit and push
+git add inventories/rhel_servers.yml
+git commit -m "Add AAP inventory file for RHEL servers"
+git push
+```
+
+**Alternative: INI Format**
+
+If you prefer INI format:
+
+```ini
+# inventories/rhel_servers.ini
+[rhel8_servers]
+rhel8-server-01 ansible_host=192.168.1.101
+rhel8-server-02 ansible_host=192.168.1.102
+
+[rhel9_servers]
+rhel9-server-01 ansible_host=192.168.1.201
+rhel9-server-02 ansible_host=192.168.1.202
+
+[rhel_servers:children]
+rhel8_servers
+rhel9_servers
+
+[rhel_servers:vars]
+ansible_user=ansible
+ansible_become=true
+```
+
+#### Step B.2: Create Inventory in AAP
+
+1. **Resources → Inventories → Add → Inventory**
+2. Configure:
+   - **Name**: `RHEL Servers (Sourced)`
+   - **Organization**: Your organization
+   - **Variables** (optional - can override source vars):
+     ```yaml
+     ---
+     # Optional: Override variables from source
+     # ansible_user: different_user
+     ```
+3. **Save**
+
+#### Step B.3: Add Inventory Source
+
+1. In the inventory you just created, click **Sources** tab
+2. **Add**
+3. Configure the source:
+   - **Name**: `RHEL Servers from Git`
+   - **Source**: `Sourced from a Project`
+   - **Execution Environment**: Select your RHEL STIG EE
+   - **Project**: `RHEL DISA STIG`
+   - **Inventory file**: `inventories/rhel_servers.yml` (or `.ini`)
+   - **Update options**:
+     - ☑ Overwrite (replace hosts/groups on sync)
+     - ☑ Overwrite variables (replace variables on sync)
+     - ☑ Update on project update (auto-sync when project syncs)
+   - **Source variables** (optional):
+     ```yaml
+     ---
+     # Optional: Pass variables to inventory script
+     ```
+4. **Save**
+
+#### Step B.4: Sync Inventory Source
+
+1. Click the **Sync** button (circular arrow) next to your source
+2. Watch the sync job run
+3. When complete, click **Hosts** tab to verify hosts were imported
+4. Click **Groups** tab to verify groups were created
+
+#### Step B.5: Schedule Regular Syncs (Optional)
+
+Keep inventory up-to-date automatically:
+
+1. In inventory source, click **Schedules** tab
+2. **Add**
+3. Configure:
+   - **Name**: `Sync RHEL inventory daily`
+   - **Start date/time**: Select start time
+   - **Frequency**: `Daily`
+   - **Run every**: `1 day`
+   - **Run at**: `02:00:00` (2 AM)
+4. **Save**
+
+### Comparing Options
+
+| Feature | Manual (Option A) | Sourced (Option B) |
+|---------|-------------------|-------------------|
+| Setup complexity | Simple | Requires inventory file in Git |
+| Maintenance | Manual updates in AAP GUI | Update Git, auto-sync to AAP |
+| Version control | ❌ No | ✅ Yes |
+| Audit trail | AAP logs only | Git history + AAP logs |
+| Scale | Good for <20 hosts | Good for any size |
+| Team collaboration | GUI only | Git workflow |
+| Automation | Manual | Automatic sync |
+| Best for | Small/test environments | Production environments |
+
+**Recommendation**: Use **Option B (Sourced)** for production. It provides:
+- Version control of inventory
+- Automatic sync from Git
+- Better collaboration (PR reviews for inventory changes)
+- Audit trail via Git history
+- Easier to manage at scale
 
 ---
 
@@ -962,6 +1114,73 @@ rhel_stig_with_rollback_tailoring_profile: ""           # optional org name
 ```yaml
 # Selective mode example - paste this in survey textarea
 sysctl_crypto_fips_enabled,audit_rules_login_events,sshd_set_idle_timeout,accounts_password_minlen_login_defs,package_aide_installed
+```
+
+### Inventory Sourced from Project - Quick Setup
+
+```bash
+# On your workstation - add inventory file to Git repo
+cd /path/to/disa-stig-rhel
+mkdir -p inventories
+
+# Create YAML inventory
+cat > inventories/rhel_servers.yml <<'EOF'
+---
+all:
+  children:
+    rhel_servers:
+      children:
+        rhel8_servers:
+          hosts:
+            rhel8-server-01:
+              ansible_host: 192.168.1.101
+            rhel8-server-02:
+              ansible_host: 192.168.1.102
+        rhel9_servers:
+          hosts:
+            rhel9-server-01:
+              ansible_host: 192.168.1.201
+      vars:
+        ansible_user: ansible
+        ansible_become: true
+EOF
+
+# Commit and push
+git add inventories/rhel_servers.yml
+git commit -m "Add AAP inventory for RHEL servers"
+git push
+
+# Then in AAP GUI:
+# 1. Resources → Inventories → Add → Inventory
+#    Name: RHEL Servers (Sourced)
+# 2. Sources → Add
+#    Source: Sourced from a Project
+#    Project: RHEL DISA STIG
+#    Inventory file: inventories/rhel_servers.yml
+#    ☑ Overwrite
+#    ☑ Update on project update
+# 3. Click Sync button
+# 4. Verify: Hosts tab shows imported hosts
+```
+
+**Inventory INI format alternative:**
+
+```ini
+# inventories/rhel_servers.ini
+[rhel8_servers]
+rhel8-server-01 ansible_host=192.168.1.101
+rhel8-server-02 ansible_host=192.168.1.102
+
+[rhel9_servers]
+rhel9-server-01 ansible_host=192.168.1.201
+
+[rhel_servers:children]
+rhel8_servers
+rhel9_servers
+
+[rhel_servers:vars]
+ansible_user=ansible
+ansible_become=true
 ```
 
 ---
