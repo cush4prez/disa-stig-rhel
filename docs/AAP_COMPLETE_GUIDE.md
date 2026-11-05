@@ -1,562 +1,969 @@
-# Ansible Automation Platform (AAP) 2.7 Complete Guide
+# Ansible Automation Platform (AAP) 2.7 - Complete Setup Guide
 
-Complete guide for deploying RHEL DISA STIG hardening with AAP 2.7.
+Complete guide for deploying RHEL DISA STIG hardening using Ansible Automation Platform 2.7.
 
 ## Table of Contents
 
 - [Overview](#overview)
-- [Initial Setup](#initial-setup)
-- [Creating Projects](#creating-projects)
-- [Setting Up Job Templates](#setting-up-job-templates)
-- [Using Surveys](#using-surveys)
+- [Prerequisites](#prerequisites)
+- [Step 1: Create Execution Environment](#step-1-create-execution-environment)
+- [Step 2: Create Project](#step-2-create-project)
+- [Step 3: Create Inventory](#step-3-create-inventory)
+- [Step 4: Create Job Templates](#step-4-create-job-templates)
+- [Step 5: Configure Surveys](#step-5-configure-surveys)
 - [Running Jobs](#running-jobs)
 - [Monitoring and Results](#monitoring-and-results)
-- [Workflows](#workflows)
-- [Best Practices](#best-practices)
+- [Emergency Recovery](#emergency-recovery)
+- [Troubleshooting](#troubleshooting)
 
 ---
 
 ## Overview
 
-This project is fully compatible with AAP 2.7 and provides:
+This role is fully compatible with AAP 2.7 and provides:
 
-- **Survey-based configuration** for easy GUI-driven deployment
-- **Selective STIG auditing** - choose specific rules or all rules
-- **Automatic backups** stored on AAP controller for disaster recovery
-- **Intelligent rollback** on operational failures
-- **Multi-RHEL support** - RHEL 8, 9, and 10
+- ✅ Survey-based GUI configuration
+- ✅ Selective or full STIG auditing
+- ✅ Automatic backup with disaster recovery
+- ✅ Intelligent auto-rollback on failures
+- ✅ RHEL 8, 9, and 10 support
+- ✅ Native Ansible parsing (no Python scripts)
 
 ---
 
-## Initial Setup
+## Prerequisites
 
-### Prerequisites
+### Required
 
-- AAP 2.7 installed and configured
-- Git repository containing this project
-- Execution environment with required collections:
-  - `ansible.posix`
-  - `community.general`
+- **AAP 2.7** installed and operational
+- **Git repository** containing this project
+- **RHEL hosts** to harden (RHEL 8, 9, or 10)
+- **Credentials** with sudo/root access to target hosts
 
-### Verify Execution Environment
+### Recommended
+
+- **Red Hat Satellite** or **RHEL subscription** for SCAP content
+- **Backup storage** on AAP controller: `/var/lib/awx/projects/stig_backups/`
+
+---
+
+## Step 1: Create Execution Environment
+
+The role requires `community.general` collection version 8.0.0+ and `python3-lxml` on target hosts.
+
+### Option A: Use Existing EE (if it has community.general 8.0+)
+
+Check your execution environment:
+
+1. **Administration → Execution Environments**
+2. Verify one includes `community.general >= 8.0.0`
+3. Note the name for later use
+
+### Option B: Create Custom EE
+
+If your existing execution environments don't have `community.general >= 8.0.0`, build a custom one.
+
+#### Prerequisites for Building EE
+
+Install ansible-builder on your workstation:
 
 ```bash
-# Check your execution environment includes required collections
-ansible-galaxy collection list
+# RHEL/CentOS
+sudo dnf install ansible-builder podman
+
+# Or via pip
+pip install ansible-builder
 ```
 
-If missing, add to your execution environment:
+#### Step B.1: Create EE Definition Files
+
+Create a directory for your execution environment:
+
+```bash
+mkdir -p ~/rhel-stig-ee
+cd ~/rhel-stig-ee
+```
+
+Create `execution-environment.yml`:
 
 ```yaml
-# execution-environment.yml
+---
+version: 3
+
+images:
+  base_image:
+    name: registry.redhat.io/ansible-automation-platform-24/ee-minimal-rhel9:latest
+
 dependencies:
   galaxy: requirements.yml
+  python:
+    - python3-lxml
+
+additional_build_steps:
+  append_final:
+    - RUN microdnf install -y python3-lxml && microdnf clean all
 ```
+
+Create `requirements.yml`:
 
 ```yaml
-# requirements.yml
+---
 collections:
-  - name: ansible.posix
   - name: community.general
+    version: ">=8.0.0"
+  - name: ansible.posix
+    version: ">=1.3.0"
+```
+
+#### Step B.2: Build the Execution Environment
+
+Build the container image:
+
+```bash
+# Build with podman (default)
+ansible-builder build --tag rhel-stig-ee:1.0.0 --container-runtime podman
+
+# Or with docker
+ansible-builder build --tag rhel-stig-ee:1.0.0 --container-runtime docker
+```
+
+This creates:
+- `context/` directory with build files
+- Container image `rhel-stig-ee:1.0.0`
+
+Verify the image:
+
+```bash
+podman images | grep rhel-stig-ee
+# or
+docker images | grep rhel-stig-ee
+```
+
+#### Step B.3: Push to Container Registry
+
+**Option 1: Red Hat Quay.io**
+
+```bash
+# Login
+podman login quay.io
+
+# Tag for registry
+podman tag rhel-stig-ee:1.0.0 quay.io/your-org/rhel-stig-ee:1.0.0
+podman tag rhel-stig-ee:1.0.0 quay.io/your-org/rhel-stig-ee:latest
+
+# Push
+podman push quay.io/your-org/rhel-stig-ee:1.0.0
+podman push quay.io/your-org/rhel-stig-ee:latest
+```
+
+**Option 2: Private Registry**
+
+```bash
+# Login
+podman login your-registry.example.com
+
+# Tag
+podman tag rhel-stig-ee:1.0.0 your-registry.example.com/rhel-stig-ee:1.0.0
+podman tag rhel-stig-ee:1.0.0 your-registry.example.com/rhel-stig-ee:latest
+
+# Push
+podman push your-registry.example.com/rhel-stig-ee:1.0.0
+podman push your-registry.example.com/rhel-stig-ee:latest
+```
+
+**Option 3: AAP Private Automation Hub**
+
+```bash
+# Login to your Automation Hub
+podman login hub.example.com
+
+# Tag
+podman tag rhel-stig-ee:1.0.0 hub.example.com/rhel-stig-ee:1.0.0
+podman tag rhel-stig-ee:1.0.0 hub.example.com/rhel-stig-ee:latest
+
+# Push
+podman push hub.example.com/rhel-stig-ee:1.0.0
+podman push hub.example.com/rhel-stig-ee:latest
+```
+
+#### Step B.4: Add Registry Credential in AAP (if private registry)
+
+If using a private registry:
+
+1. **Resources → Credentials → Add**
+2. **Name**: `Container Registry - RHEL STIG`
+3. **Organization**: Your organization
+4. **Credential Type**: `Container Registry`
+5. **Authentication URL**: `https://your-registry.example.com`
+6. **Username**: Your registry username
+7. **Password/Token**: Your registry password or token
+8. **Save**
+
+#### Step B.5: Add Execution Environment to AAP
+
+1. **Administration → Execution Environments → Add**
+2. Configure:
+   - **Name**: `RHEL STIG EE`
+   - **Image**: `quay.io/your-org/rhel-stig-ee:latest` (or your registry URL)
+   - **Pull**: `Always` (or `If not present`)
+   - **Registry credential**: Select credential from Step B.4 (if private)
+   - **Organization**: Your organization
+3. **Save**
+
+#### Step B.6: Verify Execution Environment
+
+Test the EE works:
+
+1. **Resources → Templates → Add → Add job template**
+2. Create a test template:
+   - **Name**: `Test RHEL STIG EE`
+   - **Job Type**: `Run`
+   - **Inventory**: Any inventory
+   - **Project**: Any project with a simple playbook
+   - **Execution Environment**: `RHEL STIG EE`
+   - **Playbook**: Simple test playbook
+3. **Launch** the job
+4. Verify in job output:
+   - EE image pulls successfully
+   - Collections are available
+   - No errors about missing dependencies
+
+#### Troubleshooting EE Build
+
+**Issue: Build fails with "base image not found"**
+
+Solution: Login to Red Hat registry first:
+```bash
+podman login registry.redhat.io
+# Use your Red Hat credentials
+```
+
+**Issue: "collection not found" during build**
+
+Solution: Ensure `requirements.yml` is in the same directory as `execution-environment.yml`
+
+**Issue: AAP can't pull image from registry**
+
+Solution:
+1. Verify registry credential is correct
+2. Check registry URL format (include `https://` if needed)
+3. Ensure EE image was pushed successfully
+4. Test pull manually on AAP controller:
+   ```bash
+   podman pull quay.io/your-org/rhel-stig-ee:latest
+   ```
+
+**Issue: python3-lxml not installed in EE**
+
+Solution: Add to `additional_build_steps` in `execution-environment.yml`:
+```yaml
+additional_build_steps:
+  append_final:
+    - RUN microdnf install -y python3-lxml && microdnf clean all
 ```
 
 ---
 
-## Creating Projects
+## Step 2: Create Project
 
-### Step 1: Create SCM Credential (if needed)
-
-If your repository requires authentication:
+### Step 2.1: Add Git Credential (if private repo)
 
 1. **Resources → Credentials → Add**
-2. **Credential Type**: Source Control
-3. **Username**: Your Git username
-4. **Password/Token**: Your Git password or token
-5. **Save**
+2. **Name**: `GitHub - RHEL STIG`
+3. **Organization**: Your organization
+4. **Credential Type**: `Source Control`
+5. **Username**: Your Git username
+6. **Password/Token**: Personal access token or password
+7. **Save**
 
-### Step 2: Create Project
+### Step 2.2: Create Project
 
 1. **Resources → Projects → Add**
-2. **Name**: `RHEL DISA STIG`
-3. **Organization**: Your organization
-4. **Execution Environment**: Select environment with required collections
-5. **Source Control Type**: Git
-6. **Source Control URL**: `https://github.com/yourorg/rhel8-disa-stig.git`
-7. **Source Control Credential**: (if needed)
-8. **Update Options**:
-   - ✅ Clean
-   - ✅ Delete on Update
-   - ✅ Update Revision on Launch
-9. **Save**
-10. **Sync** the project
+2. Configure:
+   - **Name**: `RHEL DISA STIG`
+   - **Organization**: Select your organization
+   - **Execution Environment**: Select EE from Step 1
+   - **Source Control Type**: `Git`
+   - **Source Control URL**: `https://github.com/yourorg/disa-stig-rhel.git`
+   - **Source Control Branch/Tag/Commit**: `main` (or your branch)
+   - **Source Control Credential**: Select credential from Step 2.1 (if private)
+   - **Options**:
+     - ☑ Clean
+     - ☑ Delete on Update
+     - ☑ Update Revision on Launch (recommended)
+3. **Save**
+4. Click **Sync** button to verify project pulls successfully
 
 ---
 
-## Setting Up Job Templates
+## Step 3: Create Inventory
 
-### Job Template 1: STIG Hardening with Survey (Recommended)
+### Step 3.1: Create Inventory
 
-This is the primary job template for production use.
+1. **Resources → Inventories → Add → Inventory**
+2. **Name**: `RHEL Servers`
+3. **Organization**: Your organization
+4. **Save**
 
-#### Create Template
+### Step 3.2: Add Hosts
 
-1. **Resources → Templates → Add → Job Template**
-2. **Name**: `DISA STIG - Hardening`
-3. **Job Type**: Run
-4. **Inventory**: Select your RHEL inventory
-5. **Project**: `RHEL DISA STIG`
-6. **Playbook**: `playbooks/rhel_stig_with_rollback.yml`
-7. **Credentials**: Machine credential with sudo access
-8. **Variables**:
-   ```yaml
-   # Optional: Set defaults (survey will override)
-   rhel_stig_with_rollback_controller_backup_dir: /var/lib/awx/projects/stig_backups
-   rhel_stig_with_rollback_fetch_to_controller: true
-   ```
-9. **Options**:
-   - ✅ Privilege Escalation
-   - ✅ Enable Fact Storage (optional)
-10. **Save**
+1. **Hosts → Add**
+2. For each RHEL server:
+   - **Name**: `rhel8-server-01`
+   - **Variables** (optional):
+     ```yaml
+     ---
+     ansible_host: 192.168.1.100
+     ```
+3. **Save**
 
-#### Add Survey
+### Step 3.3: Add Groups (Optional)
 
-1. **Click Survey tab**
-2. **Add** or **Import**
-3. **Import** from `docs/aap_survey_configuration.json`
+Create groups for different RHEL versions:
 
-Or manually add questions:
+1. **Groups → Add**
+2. **Name**: `rhel8_servers`
+3. **Save**
+4. **Hosts → Add existing host** to assign hosts to group
 
-**Question 1: STIG Audit Mode**
-- Variable: `stig_audit_mode`
-- Question: "STIG Audit Mode"
-- Answer Type: Multiple Choice
-- Choices: `full`, `selective`
-- Default: `full`
-- Required: Yes
+---
 
-**Question 2: STIG Rules**
-- Variable: `stig_rules_input`
-- Question: "STIG Rules to Audit (comma-separated)"
-- Answer Type: Textarea
-- Default: (blank)
-- Required: No
+## Step 4: Create Job Templates
 
-**Question 3: Apply Remediations**
-- Variable: `rhel_stig_with_rollback_apply_remediations`
-- Question: "Apply Remediations?"
-- Answer Type: Multiple Choice
-- Choices: `true`, `false`
-- Default: `true`
-- Required: Yes
+### Template 1: STIG Hardening (Primary - with Survey)
 
-**Question 4: Auto Rollback**
-- Variable: `rhel_stig_with_rollback_auto_rollback_on_failure`
-- Question: "Auto Rollback on Failure?"
-- Answer Type: Multiple Choice
-- Choices: `true`, `false`
-- Default: `true`
-- Required: Yes
+This is the main production template with GUI survey for easy configuration.
 
-4. **Enable Survey**
-5. **Save**
+1. **Resources → Templates → Add → Add job template**
+2. Configure **Details**:
+   - **Name**: `STIG - Full Hardening`
+   - **Job Type**: `Run`
+   - **Inventory**: `RHEL Servers`
+   - **Project**: `RHEL DISA STIG`
+   - **Execution Environment**: Select your EE
+   - **Playbook**: `playbooks/rhel_stig_with_rollback.yml`
+   - **Credentials**: 
+     - **Type**: Machine
+     - Select credential with sudo access
+   - **Variables**:
+     ```yaml
+     ---
+     # AAP controller backup configuration
+     rhel_stig_with_rollback_controller_backup_dir: /var/lib/awx/projects/stig_backups
+     rhel_stig_with_rollback_fetch_to_controller: true
+     
+     # Native parsing (recommended)
+     rhel_stig_with_rollback_use_native_parsing: true
+     rhel_stig_with_rollback_auto_install_deps: true
+     ```
+   - **Options**:
+     - ☑ Privilege Escalation
+     - ☑ Enable Fact Storage
+3. **Save**
 
-### Job Template 2: Audit Only
+**Do NOT configure survey yet - we'll do that in Step 5**
 
-Quick compliance check without remediation.
+### Template 2: Audit Only (No Remediation)
 
-1. **Resources → Templates → Add → Job Template**
-2. **Name**: `DISA STIG - Audit Only`
-3. **Project**: `RHEL DISA STIG`
-4. **Playbook**: `playbooks/rhel_stig_audit_only.yml`
-5. **Credentials**: Machine credential
-6. **Options**: ✅ Privilege Escalation
-7. **Save**
+Quick compliance check without making changes.
 
-### Job Template 3: Rollback
+1. **Resources → Templates → Add → Add job template**
+2. Configure:
+   - **Name**: `STIG - Audit Only`
+   - **Job Type**: `Run`
+   - **Inventory**: `RHEL Servers`
+   - **Project**: `RHEL DISA STIG`
+   - **Execution Environment**: Select your EE
+   - **Playbook**: `playbooks/rhel_stig_audit_only.yml`
+   - **Credentials**: Machine credential with sudo
+   - **Options**: ☑ Privilege Escalation
+3. **Save**
 
-Restore from backup after failed hardening.
+### Template 3: Rollback
 
-1. **Resources → Templates → Add → Job Template**
-2. **Name**: `DISA STIG - Rollback`
-3. **Project**: `RHEL DISA STIG`
-4. **Playbook**: `playbooks/perform_rollback.yml`
-5. **Credentials**: Machine credential
-6. **Variables**:
-   ```yaml
-   # Leave blank - will prompt
-   ```
-7. **Options**:
-   - ✅ Privilege Escalation
-   - ✅ Prompt on Launch → Extra Variables
-8. **Save**
+Restore system from backup after failed hardening.
 
-### Job Template 4: Final Audit Report
+1. **Resources → Templates → Add → Add job template**
+2. Configure:
+   - **Name**: `STIG - Rollback`
+   - **Job Type**: `Run`
+   - **Inventory**: `RHEL Servers`
+   - **Project**: `RHEL DISA STIG`
+   - **Execution Environment**: Select your EE
+   - **Playbook**: `playbooks/perform_rollback.yml`
+   - **Credentials**: Machine credential with sudo
+   - **Options**: 
+     - ☑ Privilege Escalation
+     - ☑ Prompt on launch → Variables
+   - **Variables** (example - will be overridden at launch):
+     ```yaml
+     ---
+     # Specify backup name at launch
+     rhel_stig_with_rollback_backup_name: pre_stig_hostname_20261105T120000
+     ```
+3. **Save**
+
+### Template 4: Final Audit Report
 
 Detailed compliance report with CAT I/II/III breakdown.
 
-1. **Resources → Templates → Add → Job Template**
-2. **Name**: `DISA STIG - Final Audit Report`
-3. **Project**: `RHEL DISA STIG`
-4. **Playbook**: `playbooks/final_audit_report.yml`
-5. **Credentials**: Machine credential
-6. **Options**: ✅ Privilege Escalation
-7. **Save**
+1. **Resources → Templates → Add → Add job template**
+2. Configure:
+   - **Name**: `STIG - Final Audit Report`
+   - **Job Type**: `Run`
+   - **Inventory**: `RHEL Servers`
+   - **Project**: `RHEL DISA STIG`
+   - **Execution Environment**: Select your EE
+   - **Playbook**: `playbooks/final_audit_report.yml`
+   - **Credentials**: Machine credential with sudo
+   - **Options**: ☑ Privilege Escalation
+3. **Save**
 
 ---
 
-## Using Surveys
+## Step 5: Configure Surveys
 
-### Launching a Survey-Based Job
+**IMPORTANT**: AAP 2.7 does NOT support importing JSON survey files. You must create surveys manually through the GUI.
 
-1. **Resources → Templates**
-2. **Select** `DISA STIG - Hardening`
-3. **Launch**
-4. **Fill out survey**:
+### Configure Survey for "STIG - Full Hardening" Template
 
-**Example - Full Audit:**
-```
-STIG Audit Mode: full
-STIG Rules to Audit: (leave blank)
-Apply Remediations: true
-Auto Rollback on Failure: true
-```
+1. Go to **Resources → Templates**
+2. Click **STIG - Full Hardening**
+3. Click **Survey** tab
+4. Click **Add**
+5. Add each question below:
 
-**Example - Selective Audit:**
-```
-STIG Audit Mode: selective
-STIG Rules to Audit: sysctl_crypto_fips_enabled,audit_rules_login_events,sshd_set_idle_timeout
-Apply Remediations: true
-Auto Rollback on Failure: true
-```
+#### Question 1: STIG Audit Mode
 
-5. **Next**
-6. **Launch**
+- **Question**: `STIG Audit Mode`
+- **Description**: `Choose full audit (all rules) or selective (specific rules only)`
+- **Answer variable name**: `stig_audit_mode`
+- **Answer type**: `Multiple Choice (single select)`
+- **Multiple Choice Options**:
+  ```
+  full
+  selective
+  ```
+- **Default answer**: `full`
+- **Required**: ☑ (checked)
+- Click **Save**
 
-### Finding STIG Rule IDs
+#### Question 2: STIG Rules to Audit
 
-To find valid rule IDs for selective mode:
+- **Question**: `STIG Rules (comma-separated, for selective mode)`
+- **Description**: `List specific STIG rules to audit. Only used when Audit Mode is 'selective'. Example: sysctl_crypto_fips_enabled,audit_rules_login_events,sshd_set_idle_timeout`
+- **Answer variable name**: `stig_rules_input`
+- **Answer type**: `Textarea`
+- **Default answer**: ` ` (leave blank)
+- **Required**: ☐ (unchecked)
+- Click **Save**
 
-1. Run audit-only job first
-2. Check audit report: `/opt/stig_audit/baseline_*.html`
-3. Or run final audit report playbook
-4. Use short IDs (without `xccdf_org.ssgproject.content_rule_` prefix)
+#### Question 3: Apply Remediations
 
-**Common Rule IDs:**
+- **Question**: `Apply Remediations?`
+- **Description**: `Apply fixes to failed STIG rules? If false, performs audit only.`
+- **Answer variable name**: `rhel_stig_with_rollback_apply_remediations`
+- **Answer type**: `Multiple Choice (single select)`
+- **Multiple Choice Options**:
+  ```
+  true
+  false
+  ```
+- **Default answer**: `true`
+- **Required**: ☑ (checked)
+- Click **Save**
 
-CAT I (High):
-- `sysctl_crypto_fips_enabled`
-- `no_empty_passwords`
-- `sshd_disable_empty_passwords`
+#### Question 4: Auto Rollback on Failure
 
-CAT II (Medium):
-- `audit_rules_login_events`
-- `sshd_set_idle_timeout`
-- `accounts_password_minlen_login_defs`
-- `file_permissions_var_log_audit`
+- **Question**: `Auto Rollback on Failure?`
+- **Description**: `Automatically restore from backup if system verification fails after remediation?`
+- **Answer variable name**: `rhel_stig_with_rollback_auto_rollback_on_failure`
+- **Answer type**: `Multiple Choice (single select)`
+- **Multiple Choice Options**:
+  ```
+  true
+  false
+  ```
+- **Default answer**: `true`
+- **Required**: ☑ (checked)
+- Click **Save**
 
-CAT III (Low):
-- `banner_etc_issue`
-- `sshd_print_last_log`
+#### Question 5: Organization Tailoring Profile (Optional)
+
+- **Question**: `Tailoring Profile (optional)`
+- **Description**: `Organization-specific tailoring profile name. Leave blank for DISA defaults. Example: myorg`
+- **Answer variable name**: `rhel_stig_with_rollback_tailoring_profile`
+- **Answer type**: `Text`
+- **Default answer**: ` ` (leave blank)
+- **Required**: ☐ (unchecked)
+- Click **Save**
+
+### Enable the Survey
+
+1. After adding all questions, toggle **Survey Enabled** to ON
+2. Click **Save**
 
 ---
 
 ## Running Jobs
 
-### Standard Workflow
+### Scenario 1: Full STIG Hardening
 
-1. **Audit First** (optional but recommended):
-   - Run `DISA STIG - Audit Only`
-   - Review baseline compliance
-   - Identify which rules are failing
+Audit all STIG rules and apply all remediations.
 
-2. **Harden**:
-   - Run `DISA STIG - Hardening`
-   - Fill out survey
-   - Monitor job output
+1. **Resources → Templates → STIG - Full Hardening**
+2. Click **Launch**
+3. Fill survey:
+   - **STIG Audit Mode**: `full`
+   - **STIG Rules**: (leave blank)
+   - **Apply Remediations**: `true`
+   - **Auto Rollback on Failure**: `true`
+   - **Tailoring Profile**: (leave blank or specify)
+4. **Select hosts** to run against
+5. Click **Next** → **Launch**
 
-3. **Verify**:
-   - Job automatically runs operational checks
-   - Auto-rollback triggers if verification fails
+### Scenario 2: Selective STIG Hardening
 
-4. **Review Results**:
-   - Run `DISA STIG - Final Audit Report`
-   - Check compliance improvement
+Audit and remediate only specific rules.
 
-### Emergency Recovery
+1. **Resources → Templates → STIG - Full Hardening**
+2. Click **Launch**
+3. Fill survey:
+   - **STIG Audit Mode**: `selective`
+   - **STIG Rules**: `sysctl_crypto_fips_enabled,audit_rules_login_events,sshd_set_idle_timeout`
+   - **Apply Remediations**: `true`
+   - **Auto Rollback on Failure**: `true`
+   - **Tailoring Profile**: (leave blank)
+4. **Select hosts**
+5. Click **Next** → **Launch**
 
-If a host becomes unreachable after hardening:
+### Scenario 3: Audit Only (No Changes)
 
-1. Access via console (not SSH)
-2. Run rollback manually:
-   ```bash
-   ansible-playbook -i inventory playbooks/perform_rollback.yml \
-     -e rhel_stig_with_rollback_backup_name=pre_stig_hostname_20261102T120000
+Check compliance without making any changes.
+
+1. **Resources → Templates → STIG - Audit Only**
+2. Click **Launch**
+3. **Select hosts**
+4. Click **Next** → **Launch**
+
+### Scenario 4: Perform Rollback
+
+Restore a system from backup.
+
+1. **Resources → Templates → STIG - Rollback**
+2. Click **Launch**
+3. **Variables** prompt appears - enter:
+   ```yaml
+   ---
+   rhel_stig_with_rollback_backup_name: pre_stig_rhel8-server-01_20261105T120000
    ```
+4. **Select hosts** (must match the backup hostname)
+5. Click **Next** → **Launch**
 
-Or restore from controller backup:
-
-```bash
-ansible-playbook -i inventory playbooks/emergency_restore_from_controller.yml \
-  -e target_host=hostname \
-  -e backup_name=pre_stig_hostname_20261102T120000
-```
+**Finding backup names:**
+- Check AAP controller: `/var/lib/awx/projects/stig_backups/{hostname}/`
+- Check target host: `/opt/stig_backups/`
+- From previous job output (Phase 6 summary)
 
 ---
 
 ## Monitoring and Results
 
-### Job Output
+### Job Execution Phases
 
-Monitor these phases during execution:
+Monitor the job output for these phases:
 
-1. **Phase 1: Validation** - RHEL version check, SCAP content verification
-2. **Phase 2: Backup** - Pre-hardening snapshot creation
-3. **Phase 3: Baseline Audit** - Compliance scan (selective or full)
-4. **Phase 4: Remediation** - Apply fixes (only failed rules if selective)
-5. **Phase 5: Verification** - Operational checks, SSH connectivity
-6. **Phase 6: Summary** - Final compliance score, rollback instructions
+1. **Phase 1: Validation**
+   - RHEL version detection
+   - SCAP content verification
+   - Python compatibility check
+   - Dependency installation (python3-lxml if needed)
 
-### Artifacts
+2. **Phase 2: Backup**
+   - Create pre-hardening backup
+   - Archive critical files
+   - Copy backup to AAP controller
 
-After job completion, check:
+3. **Phase 3: Baseline Audit**
+   - Run OpenSCAP scan
+   - Parse results (native Ansible or Python fallback)
+   - Categorize failures (CAT I/II/III)
+
+4. **Phase 4: Remediation** (if Apply Remediations = true)
+   - Generate Ansible remediation playbook
+   - Apply fixes to failed rules
+   - Create post-hardening audit
+
+5. **Phase 5: Verification**
+   - Test SSH connectivity
+   - Verify critical services
+   - Check system responsiveness
+   - **Auto-rollback triggers here if checks fail**
+
+6. **Phase 6: Summary**
+   - Display compliance scores
+   - Show before/after comparison
+   - Provide rollback instructions
+
+### Viewing Artifacts
+
+**On AAP Controller:**
+- Backups: `/var/lib/awx/projects/stig_backups/{hostname}/`
 
 **On Target Host:**
 - Audit results: `/opt/stig_audit/`
+  - `baseline_*.xml` - OpenSCAP XML results
+  - `baseline_*.html` - Human-readable HTML report
+  - `post_hardening_*.xml` - After remediation
 - Remediation logs: `/opt/stig_work/`
+  - `ssg-rhel*-ds-*.yml` - Generated remediation playbook
 - Backups: `/opt/stig_backups/`
+  - `pre_stig_*.tar.gz` - Compressed backup archives
 
-**On AAP Controller:**
-- Backup copies: `/var/lib/awx/projects/stig_backups/{hostname}/`
+### Compliance Scoring
 
-### Reviewing Audit Reports
+The role reports compliance as a percentage:
 
-HTML reports are generated:
-
-```bash
-# Baseline audit
-/opt/stig_audit/baseline_*.html
-
-# Post-hardening audit
-/opt/stig_audit/post_hardening_*.html
 ```
-
-Download from host or access via console.
+Baseline:         45.2% (452 pass, 548 fail, 100 N/A)
+Post-Hardening:   98.7% (987 pass, 13 fail, 100 N/A)
+Improvement:      +53.5%
+```
 
 ---
 
-## Workflows
+## Emergency Recovery
 
-### Workflow 1: Complete STIG Hardening
+### If SSH Access is Lost
 
-Create a workflow template to chain multiple jobs:
+If a host becomes unreachable after hardening:
 
-1. **Resources → Templates → Add → Workflow Template**
-2. **Name**: `DISA STIG - Complete Workflow`
-3. **Visualizer**:
+#### Method 1: Console/BMC Access
+
+1. Access via console (iDRAC, iLO, vCenter, etc.)
+2. Login as root
+3. Find latest backup:
+   ```bash
+   ls -lah /opt/stig_backups/
    ```
-   [Audit Only] → [Hardening] → [Final Report]
-                       ↓ (on failure)
-                   [Rollback]
+4. Restore manually:
+   ```bash
+   cd /
+   tar xzf /opt/stig_backups/pre_stig_hostname_20261105T120000.tar.gz
+   systemctl restart sshd
    ```
 
-**Step 1: Audit Only**
-- Job Template: `DISA STIG - Audit Only`
-- Convergence: Any
+#### Method 2: Restore from AAP Controller
 
-**Step 2: Hardening** (on success)
-- Job Template: `DISA STIG - Hardening`
-- Convergence: Any
+If you have out-of-band management or the system is still accessible:
 
-**Step 3: Final Report** (on success of hardening)
-- Job Template: `DISA STIG - Final Audit Report`
-
-**Step 4: Rollback** (on failure of hardening)
-- Job Template: `DISA STIG - Rollback`
-- Prompt for variables: Yes
-
-4. **Save**
-
-### Workflow 2: Selective Remediation
-
-For targeted fixes:
-
-1. Run audit to identify failures
-2. Review failures by category
-3. Run selective hardening for specific rules
-4. Re-audit to confirm fixes
-
----
-
-## Best Practices
-
-### Pre-Hardening
-
-- ✅ Test on non-production systems first
-- ✅ Run audit-only to establish baseline
-- ✅ Review which rules will fail before hardening
-- ✅ Schedule hardening during maintenance windows
-- ✅ Ensure console access is available
-
-### During Hardening
-
-- ✅ Monitor job output in real-time
-- ✅ Keep console access open (in case SSH breaks)
-- ✅ Have rollback procedure ready
-- ✅ Use selective mode for high-risk environments
-
-### Post-Hardening
-
-- ✅ Verify SSH access immediately
-- ✅ Test critical services
-- ✅ Review compliance improvement
-- ✅ Document exceptions/tailoring needed
-- ✅ Keep backups for at least 30 days
-
-### Backup Management
-
-**On AAP Controller:**
-
-```bash
-# Check backup storage
-du -sh /var/lib/awx/projects/stig_backups/
-
-# Clean old backups (>30 days)
-find /var/lib/awx/projects/stig_backups/ -name "*.tar.gz" -mtime +30 -delete
-```
-
-**On Target Hosts:**
-
-```bash
-# Clean old backups
-find /opt/stig_backups/ -name "*.tar.gz" -mtime +30 -delete
-```
-
-### Selective vs Full Mode
-
-**Use Selective Mode when:**
-- Testing specific fixes
-- Fixing known failures only
-- High-risk production systems
-- Gradual remediation approach
-
-**Use Full Mode when:**
-- Initial hardening
-- Non-production environments
-- Comprehensive compliance required
-- Low-risk systems
+1. **Resources → Templates → Add → Add job template**
+2. Create emergency restore template:
+   - **Playbook**: `playbooks/emergency_restore_from_controller.yml`
+   - **Prompt on launch**: Variables
+3. Launch with:
+   ```yaml
+   ---
+   target_host: rhel8-server-01
+   backup_name: pre_stig_rhel8-server-01_20261105T120000
+   ```
 
 ---
 
 ## Troubleshooting
 
-### Survey Not Appearing
+### Issue: Project Sync Fails
 
-1. Verify survey is **enabled** on job template
-2. Check survey questions are saved
-3. Ensure variable names match exactly (case-sensitive)
+**Symptom**: Project shows "Failed" status
 
-### Rules Not Found in Audit
+**Solutions**:
+1. Check Git URL is correct
+2. Verify credential has repo access
+3. Check execution environment has git
+4. Review project sync log for details
 
+### Issue: Survey Not Appearing
+
+**Symptom**: Launch button doesn't show survey
+
+**Solutions**:
+1. Verify **Survey Enabled** toggle is ON
+2. Check at least one question is defined
+3. Save the template after enabling survey
+
+### Issue: python3-lxml Not Available
+
+**Symptom**: Native parsing fails, falls back to Python scripts
+
+**Solutions**:
+1. Ensure RHEL subscription is active
+2. Enable required repositories
+3. Or disable native parsing:
+   ```yaml
+   rhel_stig_with_rollback_use_native_parsing: false
+   ```
+
+### Issue: SCAP Content Missing
+
+**Symptom**: Phase 1 fails - "SCAP content not found"
+
+**Solutions**:
+1. Role automatically installs `scap-security-guide`
+2. Verify RHEL subscription is active
+3. Manually install:
+   ```bash
+   dnf install -y openscap-scanner scap-security-guide
+   ```
+
+### Issue: Backup Fetch to Controller Fails
+
+**Symptom**: Phase 2 warning - "Failed to fetch backup to controller"
+
+**Solutions**:
+1. Create backup directory on AAP controller:
+   ```bash
+   mkdir -p /var/lib/awx/projects/stig_backups
+   chown awx:awx /var/lib/awx/projects/stig_backups
+   ```
+2. Or disable controller backup:
+   ```yaml
+   rhel_stig_with_rollback_fetch_to_controller: false
+   ```
+
+### Issue: Selective Mode Not Working
+
+**Symptom**: Full audit runs even with `stig_audit_mode: selective`
+
+**Solutions**:
+1. Verify survey variable name is exactly: `stig_audit_mode`
+2. Verify rules variable name is exactly: `stig_rules_input`
+3. Check playbook is `rhel_stig_with_rollback.yml` (not `site.yml`)
+4. Ensure rules are comma-separated with no spaces
+
+---
+
+## Finding STIG Rule IDs
+
+To identify rule IDs for selective mode:
+
+### Method 1: Run Audit-Only First
+
+1. Run **STIG - Audit Only** template
+2. Download HTML report from `/opt/stig_audit/baseline_*.html`
+3. Rule IDs are in the format: `xccdf_org.ssgproject.content_rule_RULE_ID`
+4. Use the `RULE_ID` part only
+
+### Method 2: Run Final Audit Report
+
+1. Run **STIG - Final Audit Report** template
+2. Check job output for rule categorization
+3. Copy rule IDs from output
+
+### Common Rule IDs
+
+**CAT I (High Severity):**
+- `sysctl_crypto_fips_enabled` - Enable FIPS mode
+- `no_empty_passwords` - No empty passwords
+- `sshd_disable_empty_passwords` - SSH disable empty passwords
+- `accounts_password_pam_unix_remember` - Password history
+
+**CAT II (Medium Severity):**
+- `audit_rules_login_events` - Audit login events
+- `sshd_set_idle_timeout` - SSH idle timeout
+- `accounts_password_minlen_login_defs` - Password minimum length
+- `file_permissions_var_log_audit` - Audit log permissions
+- `package_aide_installed` - AIDE installed
+- `service_auditd_enabled` - Auditd enabled
+
+**CAT III (Low Severity):**
+- `banner_etc_issue` - Login banner
+- `sshd_print_last_log` - Display last login
+- `file_owner_etc_passwd` - /etc/passwd ownership
+
+---
+
+## Best Practices
+
+### 1. Always Audit First
+
+Before applying remediations, run an audit-only job to:
+- Establish baseline compliance
+- Identify what will change
+- Plan remediation strategy
+
+### 2. Test in Non-Production
+
+- Use selective mode to test specific rules first
+- Validate in dev/test environment before production
+- Monitor for 24-48 hours post-hardening
+
+### 3. Backup Retention
+
+- Controller backups: `/var/lib/awx/projects/stig_backups/`
+- Implement backup rotation policy
+- Test restore procedures regularly
+
+### 4. Use Tailoring for Organizations
+
+Create organization-specific profiles:
+```bash
+# On workstation
+mkdir -p tailoring/myorg
+cp tailoring/example_tailoring.yml tailoring/myorg/common.yml
+# Edit with your values, commit to Git
 ```
-⚠️  WARNING: Some requested rules were not found:
-  - rule_name_xyz
-```
 
-**Solutions:**
-- Check spelling (case-sensitive)
-- Use short ID without `xccdf_org.ssgproject.content_rule_` prefix
-- Verify rule exists in your SCAP content version
+Then specify in survey: `myorg`
 
-### Job Fails on Phase 4
+### 5. Monitor Job Logs
 
-Check remediation log:
+- Save job output for audit trail
+- Review Phase 5 verification results
+- Document any manual post-remediation steps
+
+### 6. Schedule Regular Audits
+
+Create scheduled jobs to:
+- Run weekly compliance audits
+- Track compliance drift
+- Alert on new failures
+
+---
+
+## Additional Resources
+
+- [TAILORING_GUIDE.md](TAILORING_GUIDE.md) - Customize STIG variables
+- [RHEL8_COMPATIBILITY.md](RHEL8_COMPATIBILITY.md) - RHEL 8 specific notes
+- [DISASTER_RECOVERY.md](DISASTER_RECOVERY.md) - Emergency procedures
+- [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - Common issues
+- [PLAYBOOK_USAGE.md](PLAYBOOK_USAGE.md) - Which playbook to use when
+
+---
+
+## Summary Checklist
+
+- [ ] Create/verify execution environment with community.general >= 8.0.0
+- [ ] Create project pointing to Git repository
+- [ ] Create inventory with RHEL hosts
+- [ ] Create 4 job templates (Hardening, Audit, Rollback, Report)
+- [ ] Configure survey on Hardening template (5 questions)
+- [ ] Enable survey
+- [ ] Create backup directory on AAP controller
+- [ ] Test audit-only job first
+- [ ] Review baseline compliance
+- [ ] Run hardening job with survey
+- [ ] Monitor all 6 phases
+- [ ] Review final compliance report
+- [ ] Document backup names for rollback
+
+**Setup time**: ~30-45 minutes  
+**First execution**: ~15-30 minutes per host (depending on remediation count)
+
+---
+
+## Appendix: Quick Reference Commands
+
+### Custom Execution Environment - Complete Workflow
 
 ```bash
-cat /opt/stig_work/remediation_*.log
-```
+# 1. Install ansible-builder
+sudo dnf install -y ansible-builder podman
 
-Common causes:
-- Conflicting STIG rules
-- System-specific constraints
-- Service dependencies
+# 2. Create EE directory and files
+mkdir -p ~/rhel-stig-ee && cd ~/rhel-stig-ee
 
-### Host Unreachable After Hardening
-
-**Automatic Recovery:**
-- Wait for auto-rollback to trigger (if enabled)
-
-**Manual Recovery:**
-1. Access via console
-2. Check `/opt/stig_backups/ROLLBACK_INSTRUCTIONS.txt`
-3. Run rollback playbook from AAP or another host
-
-### No Compliance Improvement
-
-Possible causes:
-- Remediation didn't apply (check logs)
-- Rules require manual intervention
-- SCAP content version mismatch
-
-See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for more solutions.
-
+cat > execution-environment.yml <<'EOF'
 ---
-
-## Advanced Configuration
-
-### Custom Execution Environment
-
-Create custom EE with additional tools:
-
-```dockerfile
-# execution-environment.yml
-version: 1
+version: 3
+images:
+  base_image:
+    name: registry.redhat.io/ansible-automation-platform-24/ee-minimal-rhel9:latest
 dependencies:
   galaxy: requirements.yml
-  python: requirements.txt
+  python:
+    - python3-lxml
 additional_build_steps:
-  prepend: |
-    RUN pip3 install --upgrade pip
-    RUN dnf install -y openscap-scanner
+  append_final:
+    - RUN microdnf install -y python3-lxml && microdnf clean all
+EOF
+
+cat > requirements.yml <<'EOF'
+---
+collections:
+  - name: community.general
+    version: ">=8.0.0"
+  - name: ansible.posix
+    version: ">=1.3.0"
+EOF
+
+# 3. Login to Red Hat registry
+podman login registry.redhat.io
+
+# 4. Build the image
+ansible-builder build --tag rhel-stig-ee:1.0.0 --container-runtime podman
+
+# 5. Verify image
+podman images | grep rhel-stig-ee
+
+# 6. Tag for your registry (Quay.io example)
+podman login quay.io
+podman tag rhel-stig-ee:1.0.0 quay.io/YOUR-ORG/rhel-stig-ee:1.0.0
+podman tag rhel-stig-ee:1.0.0 quay.io/YOUR-ORG/rhel-stig-ee:latest
+
+# 7. Push to registry
+podman push quay.io/YOUR-ORG/rhel-stig-ee:1.0.0
+podman push quay.io/YOUR-ORG/rhel-stig-ee:latest
+
+# 8. Add to AAP via GUI
+# Administration → Execution Environments → Add
+# Image: quay.io/YOUR-ORG/rhel-stig-ee:latest
 ```
 
-### Credential Types
+### AAP Controller Backup Directory Setup
 
-Create custom credential type for STIG settings:
+```bash
+# On AAP controller as root
+mkdir -p /var/lib/awx/projects/stig_backups
+chown awx:awx /var/lib/awx/projects/stig_backups
+chmod 755 /var/lib/awx/projects/stig_backups
+
+# Verify
+ls -ld /var/lib/awx/projects/stig_backups
+```
+
+### Testing Collections in Execution Environment
+
+```bash
+# Test pull and run the EE locally
+podman pull quay.io/YOUR-ORG/rhel-stig-ee:latest
+
+# Run and check collections
+podman run -it --rm quay.io/YOUR-ORG/rhel-stig-ee:latest \
+  ansible-galaxy collection list | grep -E "community.general|ansible.posix"
+
+# Expected output:
+# community.general   8.0.0
+# ansible.posix       1.3.0
+```
+
+### Survey Variables Quick Reference
 
 ```yaml
-# Input Configuration
-fields:
-  - id: backup_retention_days
-    type: integer
-    label: Backup Retention (days)
-  - id: compliance_threshold
-    type: integer
-    label: Min Compliance Score
-
-# Injector Configuration
-extra_vars:
-  stig_backup_retention: "{{ backup_retention_days }}"
-  stig_compliance_threshold: "{{ compliance_threshold }}"
+# These exact variable names must be used in AAP survey questions:
+stig_audit_mode: full                                    # or 'selective'
+stig_rules_input: "rule1,rule2,rule3"                   # comma-separated, no spaces
+rhel_stig_with_rollback_apply_remediations: true        # or 'false'
+rhel_stig_with_rollback_auto_rollback_on_failure: true  # or 'false'
+rhel_stig_with_rollback_tailoring_profile: ""           # optional org name
 ```
 
-### Notifications
+### Common STIG Rule ID Examples
 
-Set up notifications for job results:
-
-1. **Administration → Notifiers → Add**
-2. **Type**: Email / Slack / Webhook
-3. **Configure** connection details
-4. **On Job Template**:
-   - Success: Send final report
-   - Failure: Alert on-call team
-   - Rollback: Critical alert
+```yaml
+# Selective mode example - paste this in survey textarea
+sysctl_crypto_fips_enabled,audit_rules_login_events,sshd_set_idle_timeout,accounts_password_minlen_login_defs,package_aide_installed
+```
 
 ---
 
-## Support
-
-For issues:
-1. Check job output logs in AAP
-2. Review target host logs in `/opt/stig_work/` and `/opt/stig_audit/`
-3. See [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
-4. Check AAP controller logs: `/var/log/tower/`
+*For support, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md) or open an issue in the repository.*

@@ -21,25 +21,51 @@
       group: root
 
   - name: Backup critical configuration files
-    community.general.archive:
-      path:
-        - /etc/passwd
-        - /etc/shadow
-        - /etc/group
-        - /etc/sudoers
-        - /etc/ssh/sshd_config
-        - /etc/pam.d
-        - /etc/login.defs
-        - /etc/security
-        - /etc/audit
-        - /etc/sysctl.conf
-        - /etc/sysctl.d
-        - /etc/selinux
-        - /etc/firewalld
-      dest: "{{ rhel_stig_with_rollback_backup_root }}/backup_{{ rhel_stig_with_rollback_backup_timestamp }}/config_files/etc_backup.tar.gz"
-      format: gz
-      mode: '0600'
-    failed_when: false
+    block:
+      - name: Try using community.general.archive module
+        community.general.archive:
+          path:
+            - /etc/passwd
+            - /etc/shadow
+            - /etc/group
+            - /etc/sudoers
+            - /etc/ssh/sshd_config
+            - /etc/pam.d
+            - /etc/login.defs
+            - /etc/security
+            - /etc/audit
+            - /etc/sysctl.conf
+            - /etc/sysctl.d
+            - /etc/selinux
+            - /etc/firewalld
+          dest: "{{ rhel_stig_with_rollback_backup_root }}/backup_{{ rhel_stig_with_rollback_backup_timestamp }}/config_files/etc_backup.tar.gz"
+          format: gz
+          mode: '0600'
+          exclude_path:
+            - /etc/pam.d/.*~
+            - /etc/security/.*~
+        register: archive_result
+        failed_when: false
+
+      - name: Fallback to tar command if archive module fails
+        ansible.builtin.command:
+          cmd: >
+            tar czf {{ rhel_stig_with_rollback_backup_root }}/backup_{{ rhel_stig_with_rollback_backup_timestamp }}/config_files/etc_backup.tar.gz
+            -C /
+            --ignore-failed-read
+            etc/passwd etc/shadow etc/group etc/sudoers
+            etc/ssh/sshd_config etc/pam.d etc/login.defs
+            etc/security etc/audit etc/sysctl.conf etc/sysctl.d
+            etc/selinux etc/firewalld
+          creates: "{{ rhel_stig_with_rollback_backup_root }}/backup_{{ rhel_stig_with_rollback_backup_timestamp }}/config_files/etc_backup.tar.gz"
+        when: archive_result is failed
+
+      - name: Set backup file permissions
+        ansible.builtin.file:
+          path: "{{ rhel_stig_with_rollback_backup_root }}/backup_{{ rhel_stig_with_rollback_backup_timestamp }}/config_files/etc_backup.tar.gz"
+          mode: '0600'
+          owner: root
+          group: root
 
   - name: Gather service facts
     ansible.builtin.service_facts:
@@ -79,11 +105,31 @@
         purpose: "Pre-STIG hardening backup"
 
   - name: Create compressed backup archive
-    community.general.archive:
-      path: "{{ rhel_stig_with_rollback_backup_root }}/backup_{{ rhel_stig_with_rollback_backup_timestamp }}"
-      dest: "{{ rhel_stig_with_rollback_backup_root }}/{{ rhel_stig_with_rollback_backup_name }}.tar.gz"
-      format: gz
-      mode: '0600'
+    block:
+      - name: Try using community.general.archive module for final archive
+        community.general.archive:
+          path: "{{ rhel_stig_with_rollback_backup_root }}/backup_{{ rhel_stig_with_rollback_backup_timestamp }}"
+          dest: "{{ rhel_stig_with_rollback_backup_root }}/{{ rhel_stig_with_rollback_backup_name }}.tar.gz"
+          format: gz
+          mode: '0600'
+        register: final_archive_result
+        failed_when: false
+
+      - name: Fallback to tar command for final archive if module fails
+        ansible.builtin.command:
+          cmd: >
+            tar czf {{ rhel_stig_with_rollback_backup_root }}/{{ rhel_stig_with_rollback_backup_name }}.tar.gz
+            -C {{ rhel_stig_with_rollback_backup_root }}
+            backup_{{ rhel_stig_with_rollback_backup_timestamp }}
+          creates: "{{ rhel_stig_with_rollback_backup_root }}/{{ rhel_stig_with_rollback_backup_name }}.tar.gz"
+        when: final_archive_result is failed
+
+      - name: Set backup archive permissions
+        ansible.builtin.file:
+          path: "{{ rhel_stig_with_rollback_backup_root }}/{{ rhel_stig_with_rollback_backup_name }}.tar.gz"
+          mode: '0600'
+          owner: root
+          group: root
 
   - name: Register backup location
     ansible.builtin.set_fact:

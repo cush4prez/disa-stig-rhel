@@ -49,12 +49,19 @@ Or create your own playbook:
 ### Option 3: Ansible Automation Platform (AAP 2.7)
 
 1. **Create Project** pointing to this repository
-2. **Import Survey** from `docs/aap_survey_configuration.json`
-3. **Create Job Template** with `playbooks/site.yml`
+2. **Create Job Template** with `playbooks/rhel_stig_with_rollback.yml`
+3. **Add Survey** manually (5 questions - see guide below)
 4. **Enable Survey** on the job template
 5. **Launch** and fill out the survey form
 
-See [docs/AAP_COMPLETE_GUIDE.md](docs/AAP_COMPLETE_GUIDE.md) for detailed instructions.
+**Quick Survey Setup**: Add these 5 questions manually in AAP GUI:
+- Question 1: `stig_audit_mode` - Multiple Choice: `full` or `selective`
+- Question 2: `stig_rules_input` - Textarea (comma-separated rule IDs)
+- Question 3: `rhel_stig_with_rollback_apply_remediations` - Multiple Choice: `true` or `false`
+- Question 4: `rhel_stig_with_rollback_auto_rollback_on_failure` - Multiple Choice: `true` or `false`
+- Question 5: `rhel_stig_with_rollback_tailoring_profile` - Text (optional)
+
+See [docs/AAP_COMPLETE_GUIDE.md](docs/AAP_COMPLETE_GUIDE.md) for complete step-by-step instructions.
 
 ## Available Playbooks
 
@@ -207,6 +214,7 @@ See `roles/rhel_stig_with_rollback/defaults/main.yml` for all variables.
 - **[SURVEY_CONFIGURATION.md](docs/SURVEY_CONFIGURATION.md)** - Survey setup and selective STIG workflow
 - **[TAILORING_GUIDE.md](docs/TAILORING_GUIDE.md)** - Organization-specific STIG variable customization
 - **[NATIVE_ANSIBLE_MIGRATION.md](docs/NATIVE_ANSIBLE_MIGRATION.md)** - Native Ansible XML parsing (recommended)
+- **[RHEL8_COMPATIBILITY.md](docs/RHEL8_COMPATIBILITY.md)** - RHEL 8 compatibility and try-fallback pattern
 - **[TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** - Common issues and solutions
 - **[DISASTER_RECOVERY.md](docs/DISASTER_RECOVERY.md)** - Emergency recovery procedures
 
@@ -224,13 +232,16 @@ See `roles/rhel_stig_with_rollback/defaults/main.yml` for all variables.
 - Ansible 2.9+
 - Ansible Collections:
   - `community.general` >= 8.0.0 (for native XML parsing)
+- python3-lxml (auto-installed on RHEL 8 if missing)
 
 Install collections:
 ```bash
 ansible-galaxy collection install -r requirements.yml
 ```
 
-The role automatically installs missing SCAP packages.
+The role automatically installs missing SCAP packages and python3-lxml dependencies.
+
+**Note**: For RHEL 8 compatibility, see [docs/RHEL8_COMPATIBILITY.md](docs/RHEL8_COMPATIBILITY.md)
 
 ## Common Tasks
 

@@ -29,14 +29,18 @@ This is exposed through:
 
 ## Ansible Automation Platform Configuration
 
-### Step 1: Import the Survey Configuration
+**IMPORTANT**: AAP 2.7 does NOT support importing JSON survey files. You must create the survey manually through the GUI.
+
+The file `docs/aap_survey_configuration.json` is provided as a **reference only** showing the survey structure.
+
+### Step 1: Create Survey Manually
 
 1. In AAP, navigate to your Job Template
 2. Click **Survey** tab
 3. Click **Add**
-4. Import the survey from: `docs/aap_survey_configuration.json`
+4. Create each survey question as shown below:
 
-Alternatively, manually create these survey questions:
+**Survey Questions to Create:**
 
 #### Question 1: STIG Audit Mode
 - **Variable Name**: `stig_audit_mode`

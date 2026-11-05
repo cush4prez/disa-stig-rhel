@@ -1,0 +1,44 @@
+---
+# Prepare test instances for STIG role testing
+- name: Prepare test instances
+  hosts: all
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Install required packages for RHEL STIG testing
+      ansible.builtin.package:
+        name:
+          - python3
+          - python3-lxml  # Required for native parsing
+          - tar
+          - gzip
+        state: present
+
+    - name: Create required directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - /opt/stig_backups
+        - /opt/stig_audit
+        - /opt/stig_work
+
+    - name: Display Python version
+      ansible.builtin.command: python3 --version
+      register: python_version
+      changed_when: false
+
+    - name: Check if lxml is available
+      ansible.builtin.command: python3 -c "import lxml.etree"
+      register: lxml_check
+      changed_when: false
+      failed_when: false
+
+    - name: Display preparation results
+      ansible.builtin.debug:
+        msg:
+          - "Test instance prepared"
+          - "Python: {{ python_version.stdout }}"
+          - "lxml available: {{ 'Yes' if lxml_check.rc == 0 else 'No' }}"
+          - "Ready for RHEL {{ ansible_distribution_major_version }} testing"

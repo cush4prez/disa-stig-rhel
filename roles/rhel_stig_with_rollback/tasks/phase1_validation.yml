@@ -1,6 +1,10 @@
 ---
 # Phase 1: Pre-hardening validation
 
+- name: Check Python compatibility for native parsing
+  ansible.builtin.include_tasks: check_python_compatibility.yml
+  when: rhel_stig_with_rollback_use_native_parsing | default(true)
+
 - name: Verify supported RHEL version
   ansible.builtin.assert:
     that:
