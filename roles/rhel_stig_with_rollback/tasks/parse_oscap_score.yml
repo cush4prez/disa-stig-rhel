@@ -36,6 +36,10 @@
       register: rhel_stig_with_rollback_oscap_results_xml
       failed_when: false
 
+    - name: Display parse xml
+      ansible.builtin.debug:
+        var: rhel_stig_with_rollback_oscap_results_xml
+
     # cspell:ignore notapplicable notchecked rhel stig oscap selectattr equalto
     - name: Count pass/fail/not-applicable/not-checked results
       ansible.builtin.set_fact:
