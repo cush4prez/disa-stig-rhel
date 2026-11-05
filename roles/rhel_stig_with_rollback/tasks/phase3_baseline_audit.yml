@@ -110,54 +110,54 @@
     - rhel_stig_with_rollback_selective_mode
     - not (rhel_stig_with_rollback_use_native_parsing | default(true))
   block:
-    - name: Copy filter audit script
-      ansible.builtin.copy:
-        content: "{{ lookup('file', playbook_dir ~ '/../files/filter_audit_results.py') }}"
-        dest: "{{ rhel_stig_with_rollback_stig_work_dir }}/filter_audit_results.py"
-        mode: '0755'
+  - name: Copy filter audit script
+    ansible.builtin.copy:
+      content: "{{ lookup('file', playbook_dir ~ '/../files/filter_audit_results.py') }}"
+      dest: "{{ rhel_stig_with_rollback_stig_work_dir }}/filter_audit_results.py"
+      mode: '0755'
 
-    - name: Filter baseline audit for selected rules
-      ansible.builtin.command: >
-        {{ rhel_stig_with_rollback_stig_work_dir }}/filter_audit_results.py
-        {{ rhel_stig_with_rollback_stig_audit_dir }}/baseline_{{ rhel_stig_with_rollback_backup_timestamp }}.xml
-        {{ rhel_stig_with_rollback_stig_rules_to_apply | join(',') }}
-      register: rhel_stig_with_rollback_filter_audit_result
-      changed_when: false
+  - name: Filter baseline audit for selected rules
+    ansible.builtin.command: >
+      {{ rhel_stig_with_rollback_stig_work_dir }}/filter_audit_results.py
+      {{ rhel_stig_with_rollback_stig_audit_dir }}/baseline_{{ rhel_stig_with_rollback_backup_timestamp }}.xml
+      {{ rhel_stig_with_rollback_stig_rules_to_apply | join(',') }}
+    register: rhel_stig_with_rollback_filter_audit_result
+    changed_when: false
 
-    - name: Parse filter results
-      ansible.builtin.set_fact:
-        rhel_stig_with_rollback_audit_filter_data: "{{ rhel_stig_with_rollback_filter_audit_result.stdout | from_json }}"
+  - name: Parse filter results
+    ansible.builtin.set_fact:
+      rhel_stig_with_rollback_audit_filter_data: "{{ rhel_stig_with_rollback_filter_audit_result.stdout | from_json }}"
 
-    - name: Display filtered audit results
-      ansible.builtin.debug:
-        msg:
-          - "========================================================================="
-          - "SELECTIVE AUDIT RESULTS"
-          - "========================================================================="
-          - "Selected rules: {{ rhel_stig_with_rollback_stig_rules_to_apply | length }}"
-          - "Rules found in audit: {{ rhel_stig_with_rollback_audit_filter_data.found | length }}"
-          - "Rules not found: {{ rhel_stig_with_rollback_audit_filter_data.not_found | length }}"
-          - ""
-          - "RESULTS BREAKDOWN:"
-          - "  Pass: {{ rhel_stig_with_rollback_audit_filter_data.pass | length }}"
-          - "  Fail: {{ rhel_stig_with_rollback_audit_filter_data.fail | length }}"
-          - "  Not Applicable: {{ rhel_stig_with_rollback_audit_filter_data.notapplicable | length }}"
-          - "  Not Checked: {{ rhel_stig_with_rollback_audit_filter_data.notchecked | length }}"
-          - ""
-          - >-
-            {% if rhel_stig_with_rollback_audit_filter_data.fail | length > 0 %}
-            FAILED RULES (will be remediated):
-            {% for rule in rhel_stig_with_rollback_audit_filter_data.fail %}  - {{ rule }}{% endfor %}
-            {% else %}✅ All selected rules passed!{% endif %}
-          - >-
-            {% if rhel_stig_with_rollback_audit_filter_data.not_found | length > 0 %}
-            ⚠️  RULES NOT FOUND IN AUDIT:
-            {% for rule in rhel_stig_with_rollback_audit_filter_data.not_found %}  - {{ rule }}{% endfor %}{% endif %}
-          - "========================================================================="
+  - name: Display filtered audit results
+    ansible.builtin.debug:
+      msg:
+        - "========================================================================="
+        - "SELECTIVE AUDIT RESULTS"
+        - "========================================================================="
+        - "Selected rules: {{ rhel_stig_with_rollback_stig_rules_to_apply | length }}"
+        - "Rules found in audit: {{ rhel_stig_with_rollback_audit_filter_data.found | length }}"
+        - "Rules not found: {{ rhel_stig_with_rollback_audit_filter_data.not_found | length }}"
+        - ""
+        - "RESULTS BREAKDOWN:"
+        - "  Pass: {{ rhel_stig_with_rollback_audit_filter_data.pass | length }}"
+        - "  Fail: {{ rhel_stig_with_rollback_audit_filter_data.fail | length }}"
+        - "  Not Applicable: {{ rhel_stig_with_rollback_audit_filter_data.notapplicable | length }}"
+        - "  Not Checked: {{ rhel_stig_with_rollback_audit_filter_data.notchecked | length }}"
+        - ""
+        - >-
+          {% if rhel_stig_with_rollback_audit_filter_data.fail | length > 0 %}
+          FAILED RULES (will be remediated):
+          {% for rule in rhel_stig_with_rollback_audit_filter_data.fail %}  - {{ rule }}{% endfor %}
+          {% else %}✅ All selected rules passed!{% endif %}
+        - >-
+          {% if rhel_stig_with_rollback_audit_filter_data.not_found | length > 0 %}
+          ⚠️  RULES NOT FOUND IN AUDIT:
+          {% for rule in rhel_stig_with_rollback_audit_filter_data.not_found %}  - {{ rule }}{% endfor %}{% endif %}
+        - "========================================================================="
 
-    - name: Save filtered rules that need remediation
-      ansible.builtin.set_fact:
-        rhel_stig_with_rollback_rules_to_remediate: "{{ rhel_stig_with_rollback_audit_filter_data.fail }}"
+  - name: Save filtered rules that need remediation
+    ansible.builtin.set_fact:
+      rhel_stig_with_rollback_rules_to_remediate: "{{ rhel_stig_with_rollback_audit_filter_data.fail }}"
 
 - name: Set rules to remediate (full mode - all rules)
   ansible.builtin.set_fact:
