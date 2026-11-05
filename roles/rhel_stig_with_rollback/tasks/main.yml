@@ -11,36 +11,36 @@
 - name: Phase 1 - Pre-hardening validation
   ansible.builtin.include_tasks: phase1_validation.yml
   tags:
-    - always
-    - validation
+  - always
+  - validation
 
 - name: Phase 2 - Create pre-hardening backup
   ansible.builtin.include_tasks: phase2_backup.yml
   when: rhel_stig_with_rollback_enable_auto_backup
   tags:
-    - backup
+  - backup
 
 - name: Phase 3 - Baseline audit
   ansible.builtin.include_tasks: phase3_baseline_audit.yml
   tags:
-    - audit
-    - baseline
+  - audit
+  - baseline
 
 - name: Phase 4 - Generate and apply STIG remediations
   ansible.builtin.include_tasks: phase4_remediation.yml
   when: rhel_stig_with_rollback_apply_remediations
   tags:
-    - remediation
+  - remediation
 
 - name: Phase 5 - Post-hardening verification
   ansible.builtin.include_tasks: phase5_verification.yml
   when: rhel_stig_with_rollback_apply_remediations
   tags:
-    - verification
-    - operational-check
+  - verification
+  - operational-check
 
 - name: Phase 6 - Final summary
   ansible.builtin.include_tasks: phase6_summary.yml
   tags:
-    - summary
-    - report
+  - summary
+  - report
