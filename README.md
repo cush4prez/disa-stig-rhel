@@ -6,6 +6,8 @@ Ansible automation for applying DISA STIG hardening to RHEL 8/9/10 systems with 
 
 - ✅ **Selective or Full STIG Auditing** - Audit specific rules or all rules
 - ✅ **Ansible-based Remediation** - Native Ansible tasks (not bash scripts)
+- ✅ **Native XML Parsing** - No Python scripts, pure Ansible using community.general.xml
+- ✅ **Organization Tailoring** - Customize STIG variables for your organization
 - ✅ **Automatic Backup** - Pre-hardening snapshots with disaster recovery
 - ✅ **Intelligent Rollback** - Auto-rollback on operational failures
 - ✅ **AAP 2.7 Integration** - Survey-based configuration for easy deployment
@@ -25,13 +27,23 @@ Prompts you for:
 - Whether to apply remediations
 - Auto-rollback settings
 
-### Option 2: Using the Role
+### Option 2: Using the Role (Recommended for Production)
+
+The cleanest approach - just invokes the role:
 
 ```bash
-ansible-playbook -i inventory playbooks/rhel_stig_with_rollback.yml
+ansible-playbook -i inventory playbooks/site.yml
 ```
 
-Or create your own playbook:
+Pass variables via extra vars or group_vars:
+
+```bash
+ansible-playbook -i inventory playbooks/site.yml \
+  -e rhel_stig_with_rollback_tailoring_profile=myorg \
+  -e rhel_stig_with_rollback_apply_remediations=true
+```
+
+Or create your own minimal playbook:
 
 ```yaml
 ---
@@ -44,15 +56,32 @@ Or create your own playbook:
       rhel_stig_with_rollback_apply_remediations: true
 ```
 
+**Why site.yml?**
+- ✅ Uses role (native Ansible parsing)
+- ✅ Clean, maintainable code
+- ✅ No duplicate logic
+- ✅ Recommended for AAP deployments
+
+See [docs/PLAYBOOK_USAGE.md](docs/PLAYBOOK_USAGE.md) for comparison of all playbooks.
+
 ### Option 3: Ansible Automation Platform (AAP 2.7)
 
 1. **Create Project** pointing to this repository
-2. **Import Survey** from `docs/aap_survey_configuration.json`
-3. **Create Job Template** with `playbooks/rhel_stig_with_rollback.yml`
+2. **Create Job Template** with `playbooks/site.yml` ⭐ **(recommended - uses role)**
+3. **Add Survey** manually (5 questions - see guide below)
 4. **Enable Survey** on the job template
 5. **Launch** and fill out the survey form
 
-See [docs/AAP_COMPLETE_GUIDE.md](docs/AAP_COMPLETE_GUIDE.md) for detailed instructions.
+**Quick Survey Setup**: Add these 5 questions manually in AAP GUI:
+- Question 1: `stig_audit_mode` - Multiple Choice: `full` or `selective`
+- Question 2: `stig_rules_input` - Textarea (comma-separated rule IDs)
+- Question 3: `rhel_stig_with_rollback_apply_remediations` - Multiple Choice: `true` or `false`
+- Question 4: `rhel_stig_with_rollback_auto_rollback_on_failure` - Multiple Choice: `true` or `false`
+- Question 5: `rhel_stig_with_rollback_tailoring_profile` - Text (optional)
+
+**Note**: The survey works with `site.yml` because it calls the role. The role automatically processes survey variables via its `pre_tasks`.
+
+See [docs/AAP_COMPLETE_GUIDE.md](docs/AAP_COMPLETE_GUIDE.md) for complete step-by-step instructions.
 
 ## Available Playbooks
 
@@ -108,6 +137,57 @@ rhel_stig_with_rollback_stig_rules_to_apply: []
 
 See [docs/SURVEY_CONFIGURATION.md](docs/SURVEY_CONFIGURATION.md) for complete guide.
 
+## Organization Tailoring
+
+**New Feature:** Customize STIG security control variables for your organization.
+
+### Quick Example
+
+```bash
+# Create your organization's tailoring profile
+mkdir -p tailoring/myorg
+cp tailoring/example_tailoring.yml tailoring/myorg/common.yml
+
+# Edit with your values
+vim tailoring/myorg/common.yml
+
+# Apply with tailoring
+ansible-playbook -i inventory playbooks/rhel_stig_with_rollback.yml \
+  -e rhel_stig_with_rollback_tailoring_profile=myorg
+```
+
+### Common Tailoring Variables
+
+- `var_password_pam_minlen` - Password length requirement
+- `var_accounts_tmout` - Session timeout (seconds)
+- `var_accounts_passwords_pam_faillock_deny` - Failed login attempts
+- `sshd_idle_timeout_value` - SSH idle timeout
+- `var_auditd_max_log_file` - Audit log size
+
+See [docs/TAILORING_GUIDE.md](docs/TAILORING_GUIDE.md) for complete documentation.
+
+## Native Ansible Parsing
+
+**New Feature:** XML parsing using native Ansible modules instead of Python scripts.
+
+### Benefits
+
+- 🔒 **Better Security** - No script execution on target hosts
+- 🚀 **Easier Maintenance** - Pure Ansible, no Python expertise required
+- ✅ **Built-in Idempotency** - Declarative approach with Ansible's error handling
+- 📦 **No Script Distribution** - Reduces attack surface and deployment complexity
+
+### Usage
+
+Native parsing is enabled by default. To use legacy Python scripts:
+
+```yaml
+# group_vars/all.yml or extra vars
+rhel_stig_with_rollback_use_native_parsing: false
+```
+
+See [docs/NATIVE_ANSIBLE_MIGRATION.md](docs/NATIVE_ANSIBLE_MIGRATION.md) for complete details.
+
 ## Role Variables
 
 ### Core Settings
@@ -117,6 +197,18 @@ See [docs/SURVEY_CONFIGURATION.md](docs/SURVEY_CONFIGURATION.md) for complete gu
 | `rhel_stig_with_rollback_apply_remediations` | `true` | Apply remediations after audit |
 | `rhel_stig_with_rollback_enable_auto_backup` | `true` | Create pre-hardening backup |
 | `rhel_stig_with_rollback_auto_rollback_on_failure` | `true` | Auto-rollback on verification failure |
+
+### Tailoring Settings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `rhel_stig_with_rollback_tailoring_profile` | `""` | Organization tailoring profile (empty = defaults) |
+
+### Parsing Method
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `rhel_stig_with_rollback_use_native_parsing` | `true` | Use native Ansible XML parsing (recommended) |
 
 ### Selective STIG Settings
 
@@ -140,11 +232,15 @@ See `roles/rhel_stig_with_rollback/defaults/main.yml` for all variables.
 
 - **[AAP_COMPLETE_GUIDE.md](docs/AAP_COMPLETE_GUIDE.md)** - Complete AAP 2.7 setup and usage
 - **[SURVEY_CONFIGURATION.md](docs/SURVEY_CONFIGURATION.md)** - Survey setup and selective STIG workflow
+- **[TAILORING_GUIDE.md](docs/TAILORING_GUIDE.md)** - Organization-specific STIG variable customization
+- **[NATIVE_ANSIBLE_MIGRATION.md](docs/NATIVE_ANSIBLE_MIGRATION.md)** - Native Ansible XML parsing (recommended)
+- **[RHEL8_COMPATIBILITY.md](docs/RHEL8_COMPATIBILITY.md)** - RHEL 8 compatibility and try-fallback pattern
 - **[TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** - Common issues and solutions
 - **[DISASTER_RECOVERY.md](docs/DISASTER_RECOVERY.md)** - Emergency recovery procedures
 
 ### Reference Guides
 
+- **[PLAYBOOK_USAGE.md](docs/PLAYBOOK_USAGE.md)** - Which playbooks to use (IMPORTANT)
 - **[PLAYBOOK_REFERENCE.md](docs/PLAYBOOK_REFERENCE.md)** - Complete playbook descriptions
 - **[ROLE_DOCUMENTATION.md](docs/ROLE_DOCUMENTATION.md)** - Role architecture and phases
 
@@ -154,9 +250,18 @@ See `roles/rhel_stig_with_rollback/defaults/main.yml` for all variables.
 - openscap-scanner
 - scap-security-guide
 - Ansible 2.9+
-- Python 3.6+
+- Ansible Collections:
+  - `community.general` >= 8.0.0 (for native XML parsing)
+- python3-lxml (auto-installed on RHEL 8 if missing)
 
-The role automatically installs missing SCAP packages.
+Install collections:
+```bash
+ansible-galaxy collection install -r requirements.yml
+```
+
+The role automatically installs missing SCAP packages and python3-lxml dependencies.
+
+**Note**: For RHEL 8 compatibility, see [docs/RHEL8_COMPATIBILITY.md](docs/RHEL8_COMPATIBILITY.md)
 
 ## Common Tasks
 
@@ -193,6 +298,12 @@ ansible-playbook -i inventory playbooks/emergency_restore_from_controller.yml \
 .
 ├── ansible.cfg                   # Ansible configuration
 ├── inventory                     # Default inventory
+├── tailoring/                    # Organization-specific STIG variables
+│   ├── README.md                 # Tailoring documentation
+│   ├── example_tailoring.yml     # Example template
+│   └── <org_name>/               # Your organization's profiles
+│       ├── common.yml            # Variables for all RHEL versions
+│       └── rhel{8,9,10}.yml     # Version-specific overrides
 ├── playbooks/                    # All playbooks
 │   ├── rhel_stig_with_rollback.yml              # Main (AAP compatible)
 │   ├── rhel_stig_with_rollback_interactive.yml  # Interactive CLI

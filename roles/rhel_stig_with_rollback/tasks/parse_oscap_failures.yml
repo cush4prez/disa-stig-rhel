@@ -1,0 +1,180 @@
+---
+# Parse OSCAP failures and categorize by severity (CAT I/II/III) using native Ansible
+# Replaces: files/parse_oscap_failures.py
+#
+# Input variables:
+#   - oscap_xml_file: Path to OSCAP XML results
+#
+# Output variables:
+#   - rhel_stig_with_rollback_oscap_failures: Dictionary with cat1/cat2/cat3 failures and counts
+
+- name: Check if audit XML file exists
+  ansible.builtin.stat:
+    path: "{{ oscap_xml_file }}"
+  register: rhel_stig_with_rollback_oscap_xml_stat
+
+- name: Fail if XML not found
+  ansible.builtin.fail:
+    msg: "OSCAP XML file not found: {{ oscap_xml_file }}"
+  when: not rhel_stig_with_rollback_oscap_xml_stat.stat.exists
+
+- name: Initialize failures tracking
+  ansible.builtin.set_fact:
+    rhel_stig_with_rollback_oscap_failures:
+      cat1: []
+      cat2: []
+      cat3: []
+      pass_count: 0
+      fail_count: 0
+      notapplicable_count: 0
+      notchecked_count: 0
+      compliance: 0.0
+
+- name: Read OSCAP XML file
+  ansible.builtin.slurp:
+    src: "{{ oscap_xml_file }}"
+  register: rhel_stig_with_rollback_oscap_xml_content
+
+- name: Extract all Rule elements from Benchmark
+  community.general.xml:
+    xmlstring: "{{ rhel_stig_with_rollback_oscap_xml_content.content | b64decode }}"
+    xpath: "//*[local-name()='Rule']"
+    content: attribute
+  register: rhel_stig_with_rollback_oscap_rules_xml
+  failed_when: false
+
+- name: Extract rule titles
+  community.general.xml:
+    xmlstring: "{{ rhel_stig_with_rollback_oscap_xml_content.content | b64decode }}"
+    xpath: "//*[local-name()='Rule']/*[local-name()='title']"
+    content: text
+  register: rhel_stig_with_rollback_oscap_rule_titles_xml
+  failed_when: false
+
+- name: Extract rule STIG IDs (ident elements)
+  community.general.xml:
+    xmlstring: "{{ rhel_stig_with_rollback_oscap_xml_content.content | b64decode }}"
+    xpath: "//*[local-name()='Rule']/*[local-name()='ident']"
+    content: text
+  register: rhel_stig_with_rollback_oscap_rule_idents_xml
+  failed_when: false
+
+- name: Build rule metadata map
+  ansible.builtin.set_fact:
+    rhel_stig_with_rollback_oscap_rule_metadata: >-
+      {%- set metadata = {} -%}
+      {%- for rule in rhel_stig_with_rollback_oscap_rules_xml.matches | default([]) -%}
+        {%- set rule_id = rule.id -%}
+        {%- set short_id = rule_id.split('_rule_')[1] if '_rule_' in rule_id else rule_id -%}
+        {%- set severity = rule.severity | default('unknown') -%}
+        {%- set _ = metadata.update({
+          rule_id: {
+            'short_id': short_id,
+            'severity': severity,
+            'category': 'CAT I' if severity == 'high' else ('CAT II' if severity == 'medium' else 'CAT III'),
+            'title': rule_id
+          }
+        }) -%}
+      {%- endfor -%}
+      {{ metadata }}
+
+- name: Update rule metadata with titles (parallel iteration)
+  ansible.builtin.set_fact:
+    rhel_stig_with_rollback_oscap_rule_metadata: >-
+      {%- set updated = rhel_stig_with_rollback_oscap_rule_metadata -%}
+      {%- for rule in rhel_stig_with_rollback_oscap_rules_xml.matches | default([]) -%}
+        {%- for title in rhel_stig_with_rollback_oscap_rule_titles_xml.matches | default([]) -%}
+          {%- if loop.index0 == loop.index0 and updated[rule.id] is defined -%}
+            {%- set _ = updated[rule.id].update({'title': title.text}) -%}
+          {%- endif -%}
+        {%- endfor -%}
+      {%- endfor -%}
+      {{ updated }}
+  when:
+    - rhel_stig_with_rollback_oscap_rule_titles_xml.matches is defined
+    - rhel_stig_with_rollback_oscap_rules_xml.matches is defined
+
+- name: Extract all test results
+  community.general.xml:
+    xmlstring: "{{ rhel_stig_with_rollback_oscap_xml_content.content | b64decode }}"
+    xpath: "//*[local-name()='rule-result']"
+    content: attribute
+  register: rhel_stig_with_rollback_oscap_test_results_xml
+  failed_when: false
+
+- name: Extract result values for each rule-result
+  community.general.xml:
+    xmlstring: "{{ rhel_stig_with_rollback_oscap_xml_content.content | b64decode }}"
+    xpath: "//*[local-name()='rule-result']/*[local-name()='result']"
+    content: text
+  register: rhel_stig_with_rollback_oscap_test_results_values_xml
+  failed_when: false
+
+- name: Process test results and categorize failures
+  vars:
+    rule_id: "{{ item.0.idref }}"
+    result: "{{ item.1.text }}"
+    metadata: >-
+      {{ rhel_stig_with_rollback_oscap_rule_metadata[rule_id] | default({
+        'short_id': rule_id,
+        'severity': 'unknown',
+        'category': 'CAT III',
+        'title': rule_id
+      }) }}
+  ansible.builtin.set_fact:
+    rhel_stig_with_rollback_oscap_failures: >-
+      {%- set failures = rhel_stig_with_rollback_oscap_failures -%}
+      {%- if result == 'pass' -%}
+        {%- set _ = failures.update({'pass_count': failures.pass_count + 1}) -%}
+      {%- elif result == 'fail' -%}
+        {%- set _ = failures.update({'fail_count': failures.fail_count + 1}) -%}
+        {%- set failure_info = {
+          'id': metadata.short_id,
+          'stig_id': 'N/A',
+          'title': metadata.title,
+          'severity': metadata.severity
+        } -%}
+        {%- if metadata.category == 'CAT I' -%}
+          {%- set _ = failures.cat1.append(failure_info) -%}
+        {%- elif metadata.category == 'CAT II' -%}
+          {%- set _ = failures.cat2.append(failure_info) -%}
+        {%- else -%}
+          {%- set _ = failures.cat3.append(failure_info) -%}
+        {%- endif -%}
+      {%- elif result == 'notapplicable' -%}
+        {%- set _ = failures.update({'notapplicable_count': failures.notapplicable_count + 1}) -%}
+      {%- elif result == 'notchecked' -%}
+        {%- set _ = failures.update({'notchecked_count': failures.notchecked_count + 1}) -%}
+      {%- endif -%}
+      {{ failures }}
+  loop: >-
+    {{ rhel_stig_with_rollback_oscap_test_results_xml.matches | default([])
+    | zip(rhel_stig_with_rollback_oscap_test_results_values_xml.matches | default([]))
+    | list }}
+  loop_control:
+    label: "{{ rule_id }}: {{ result }}"
+  when:
+    - rhel_stig_with_rollback_oscap_test_results_xml.matches is defined
+    - rhel_stig_with_rollback_oscap_test_results_values_xml.matches is defined
+
+- name: Calculate compliance score
+  ansible.builtin.set_fact:
+    rhel_stig_with_rollback_oscap_failures: >-
+      {%- set failures = rhel_stig_with_rollback_oscap_failures -%}
+      {%- set total_checked = failures.pass_count + failures.fail_count -%}
+      {%- if total_checked > 0 -%}
+        {%- set compliance = ((failures.pass_count / total_checked * 100) | round(2)) -%}
+        {%- set _ = failures.update({'compliance': compliance}) -%}
+      {%- endif -%}
+      {{ failures }}
+
+- name: Display failures summary
+  ansible.builtin.debug:
+    msg:
+      - "OSCAP Failures by Category:"
+      - "  CAT I (High): {{ rhel_stig_with_rollback_oscap_failures.cat1 | length }}"
+      - "  CAT II (Medium): {{ rhel_stig_with_rollback_oscap_failures.cat2 | length }}"
+      - "  CAT III (Low): {{ rhel_stig_with_rollback_oscap_failures.cat3 | length }}"
+      - "  Total Failures: {{ rhel_stig_with_rollback_oscap_failures.fail_count }}"
+      - "  Total Passed: {{ rhel_stig_with_rollback_oscap_failures.pass_count }}"
+      - "  Compliance: {{ rhel_stig_with_rollback_oscap_failures.compliance }}%"

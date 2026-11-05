@@ -1,0 +1,185 @@
+---
+# Test playbook for native Ansible XML parsing
+# Compares results between Python scripts and native Ansible approach
+
+- name: Test Native Ansible OSCAP Parsing
+  hosts: localhost
+  gather_facts: true
+
+  vars:
+    test_xml_file: "/opt/stig_audit/baseline_test.xml"
+    use_sample: true  # Create sample XML for testing
+
+  tasks:
+    - name: Create sample OSCAP XML for testing
+      when: use_sample
+      block:
+        - name: Ensure test directory exists
+          ansible.builtin.file:
+            path: "/opt/stig_audit"
+            state: directory
+            mode: '0755'
+
+        - name: Create sample OSCAP XML
+          ansible.builtin.copy:
+            dest: "{{ test_xml_file }}"
+            content: |
+              <?xml version="1.0" encoding="UTF-8"?>
+              <Benchmark xmlns="http://checklists.nist.gov/xccdf/1.2" id="xccdf_org.ssgproject.content_benchmark_RHEL-9">
+                <Rule id="xccdf_org.ssgproject.content_rule_sysctl_crypto_fips_enabled" severity="high">
+                  <title>Enable FIPS Mode</title>
+                  <ident system="https://public.cyber.mil/stigs/cci/">CCI-000068</ident>
+                  <ident>V-230222</ident>
+                </Rule>
+                <Rule id="xccdf_org.ssgproject.content_rule_audit_rules_login_events" severity="medium">
+                  <title>Audit Login Events</title>
+                  <ident>V-230223</ident>
+                </Rule>
+                <Rule id="xccdf_org.ssgproject.content_rule_sshd_set_idle_timeout" severity="low">
+                  <title>Set SSH Idle Timeout</title>
+                  <ident>V-230224</ident>
+                </Rule>
+                <TestResult id="xccdf_org.open-scap_testresult_default-profile">
+                  <rule-result idref="xccdf_org.ssgproject.content_rule_sysctl_crypto_fips_enabled">
+                    <result>fail</result>
+                  </rule-result>
+                  <rule-result idref="xccdf_org.ssgproject.content_rule_audit_rules_login_events">
+                    <result>pass</result>
+                  </rule-result>
+                  <rule-result idref="xccdf_org.ssgproject.content_rule_sshd_set_idle_timeout">
+                    <result>fail</result>
+                  </rule-result>
+                  <rule-result idref="xccdf_org.ssgproject.content_rule_some_other_rule">
+                    <result>pass</result>
+                  </rule-result>
+                  <rule-result idref="xccdf_org.ssgproject.content_rule_another_rule">
+                    <result>notapplicable</result>
+                  </rule-result>
+                </TestResult>
+              </Benchmark>
+            mode: '0644'
+
+        - name: Display test setup
+          ansible.builtin.debug:
+            msg:
+              - "Test XML created: {{ test_xml_file }}"
+              - "Expected results:"
+              - "  Pass: 2"
+              - "  Fail: 2"
+              - "  Not Applicable: 1"
+              - "  Compliance: 50%"
+
+    - name: "TEST 1: Parse OSCAP Score (Native Ansible)"
+      block:
+        - name: Parse score with native Ansible
+          ansible.builtin.include_tasks: ../roles/rhel_stig_with_rollback/tasks/parse_oscap_score.yml
+          vars:
+            oscap_xml_file: "{{ test_xml_file }}"
+
+        - name: Display native Ansible results
+          ansible.builtin.debug:
+            msg:
+              - "========================================================================="
+              - "TEST 1: OSCAP Score Parsing (Native Ansible)"
+              - "========================================================================="
+              - "Compliance Score: {{ oscap_compliance_score }}%"
+              - "Pass Count: {{ oscap_pass_count }}"
+              - "Fail Count: {{ oscap_fail_count }}"
+              - "Not Applicable: {{ oscap_notapplicable_count }}"
+              - "Not Checked: {{ oscap_notchecked_count }}"
+              - "Checked Rules: {{ oscap_checked_rules }}"
+              - "========================================================================="
+
+        - name: Validate score calculation
+          ansible.builtin.assert:
+            that:
+              - oscap_pass_count | int == 2
+              - oscap_fail_count | int == 2
+              - oscap_notapplicable_count | int == 1
+              - oscap_compliance_score == "50.0"
+            success_msg: "✅ Score parsing validation PASSED"
+            fail_msg: "❌ Score parsing validation FAILED"
+
+    - name: "TEST 2: Filter Audit Results (Native Ansible)"
+      block:
+        - name: Filter specific rules with native Ansible
+          ansible.builtin.include_tasks: ../roles/rhel_stig_with_rollback/tasks/filter_audit_results.yml
+          vars:
+            oscap_xml_file: "{{ test_xml_file }}"
+            stig_rules_to_filter:
+              - sysctl_crypto_fips_enabled
+              - audit_rules_login_events
+              - sshd_set_idle_timeout
+
+        - name: Display filter results
+          ansible.builtin.debug:
+            msg:
+              - "========================================================================="
+              - "TEST 2: Filter Audit Results (Native Ansible)"
+              - "========================================================================="
+              - "Found Rules: {{ oscap_filtered_results.found }}"
+              - "Not Found: {{ oscap_filtered_results.not_found }}"
+              - "Pass: {{ oscap_filtered_results.pass }}"
+              - "Fail: {{ oscap_filtered_results.fail }}"
+              - "Not Applicable: {{ oscap_filtered_results.notapplicable }}"
+              - "========================================================================="
+
+        - name: Validate filter results
+          ansible.builtin.assert:
+            that:
+              - oscap_filtered_results.found | length == 3
+              - oscap_filtered_results.pass | length == 1
+              - oscap_filtered_results.fail | length == 2
+              - "'audit_rules_login_events' in oscap_filtered_results.pass"
+              - "'sysctl_crypto_fips_enabled' in oscap_filtered_results.fail"
+            success_msg: "✅ Filter validation PASSED"
+            fail_msg: "❌ Filter validation FAILED"
+
+    - name: "TEST 3: Parse Failures by Category (Native Ansible)"
+      block:
+        - name: Parse failures with native Ansible
+          ansible.builtin.include_tasks: ../roles/rhel_stig_with_rollback/tasks/parse_oscap_failures.yml
+          vars:
+            oscap_xml_file: "{{ test_xml_file }}"
+
+        - name: Display failure categorization
+          ansible.builtin.debug:
+            msg:
+              - "========================================================================="
+              - "TEST 3: Parse Failures by Category (Native Ansible)"
+              - "========================================================================="
+              - "CAT I (High): {{ oscap_failures.cat1 | length }}"
+              - "CAT II (Medium): {{ oscap_failures.cat2 | length }}"
+              - "CAT III (Low): {{ oscap_failures.cat3 | length }}"
+              - "Total Failed: {{ oscap_failures.fail_count }}"
+              - "Compliance: {{ oscap_failures.compliance }}%"
+              - "========================================================================="
+
+        - name: Validate failure categorization
+          ansible.builtin.assert:
+            that:
+              - oscap_failures.cat1 | length == 1  # sysctl_crypto_fips_enabled (high)
+              - oscap_failures.cat3 | length == 1  # sshd_set_idle_timeout (low)
+              - oscap_failures.fail_count == 2
+              - oscap_failures.pass_count == 2
+            success_msg: "✅ Failure categorization validation PASSED"
+            fail_msg: "❌ Failure categorization validation FAILED"
+
+    - name: "SUMMARY: All Tests"
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================="
+          - "NATIVE ANSIBLE PARSING TEST SUMMARY"
+          - "========================================================================="
+          - "✅ TEST 1: OSCAP Score Parsing - PASSED"
+          - "✅ TEST 2: Filter Audit Results - PASSED"
+          - "✅ TEST 3: Parse Failures by Category - PASSED"
+          - ""
+          - "All native Ansible parsing implementations validated successfully!"
+          - "========================================================================="
+
+    - name: Cleanup test file
+      ansible.builtin.file:
+        path: "{{ test_xml_file }}"
+        state: absent
+      when: use_sample
