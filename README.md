@@ -27,13 +27,23 @@ Prompts you for:
 - Whether to apply remediations
 - Auto-rollback settings
 
-### Option 2: Using the Role (Recommended)
+### Option 2: Using the Role (Recommended for Production)
+
+The cleanest approach - just invokes the role:
 
 ```bash
 ansible-playbook -i inventory playbooks/site.yml
 ```
 
-Or create your own playbook:
+Pass variables via extra vars or group_vars:
+
+```bash
+ansible-playbook -i inventory playbooks/site.yml \
+  -e rhel_stig_with_rollback_tailoring_profile=myorg \
+  -e rhel_stig_with_rollback_apply_remediations=true
+```
+
+Or create your own minimal playbook:
 
 ```yaml
 ---
@@ -46,10 +56,18 @@ Or create your own playbook:
       rhel_stig_with_rollback_apply_remediations: true
 ```
 
+**Why site.yml?**
+- ✅ Uses role (native Ansible parsing)
+- ✅ Clean, maintainable code
+- ✅ No duplicate logic
+- ✅ Recommended for AAP deployments
+
+See [docs/PLAYBOOK_USAGE.md](docs/PLAYBOOK_USAGE.md) for comparison of all playbooks.
+
 ### Option 3: Ansible Automation Platform (AAP 2.7)
 
 1. **Create Project** pointing to this repository
-2. **Create Job Template** with `playbooks/rhel_stig_with_rollback.yml`
+2. **Create Job Template** with `playbooks/site.yml` ⭐ **(recommended - uses role)**
 3. **Add Survey** manually (5 questions - see guide below)
 4. **Enable Survey** on the job template
 5. **Launch** and fill out the survey form
@@ -60,6 +78,8 @@ Or create your own playbook:
 - Question 3: `rhel_stig_with_rollback_apply_remediations` - Multiple Choice: `true` or `false`
 - Question 4: `rhel_stig_with_rollback_auto_rollback_on_failure` - Multiple Choice: `true` or `false`
 - Question 5: `rhel_stig_with_rollback_tailoring_profile` - Text (optional)
+
+**Note**: The survey works with `site.yml` because it calls the role. The role automatically processes survey variables via its `pre_tasks`.
 
 See [docs/AAP_COMPLETE_GUIDE.md](docs/AAP_COMPLETE_GUIDE.md) for complete step-by-step instructions.
 
