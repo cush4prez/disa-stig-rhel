@@ -35,6 +35,10 @@
     src: "{{ oscap_xml_file }}"
   register: oscap_xml_content
 
+- name: Debugging
+  ansible.builtin.debug:
+    var: oscap_xml_content
+
 - name: Extract all rule-result elements from XML
   community.general.xml:
     xmlstring: "{{ oscap_xml_content.content | b64decode }}"
