@@ -33,9 +33,25 @@ rhel_stig_with_rollback_backup_name: "pre_stig_{{ ansible_hostname }}_{{ rhel_st
 rhel_stig_with_rollback_fetch_to_controller: true
 rhel_stig_with_rollback_controller_backup_dir: "/var/lib/awx/projects/stig_backups"
 
-# STIG configuration
+# Benchmark profile configuration
+# Choose which security benchmark to apply
+# Options: stig, cis, cis_server_l1, cis_server_l2, cis_workstation_l1, cis_workstation_l2, custom
+# - stig: DISA STIG (default)
+# - cis: CIS Red Hat Enterprise Linux Benchmark (general)
+# - cis_server_l1: CIS Server Level 1
+# - cis_server_l2: CIS Server Level 2
+# - cis_workstation_l1: CIS Workstation Level 1
+# - cis_workstation_l2: CIS Workstation Level 2
+# - custom: Use rhel_stig_with_rollback_stig_profile_id directly (for other profiles)
+rhel_stig_with_rollback_benchmark_profile: "stig"
+
+# SCAP/STIG configuration
 rhel_stig_with_rollback_scap_ds_path: "/usr/share/xml/scap/ssg/content/ssg-rhel{{ ansible_distribution_major_version }}-ds.xml"
+
+# Direct profile ID (auto-set based on benchmark_profile, or override with custom)
+# Full list: oscap info /usr/share/xml/scap/ssg/content/ssg-rhel9-ds.xml | grep Profile
 rhel_stig_with_rollback_stig_profile_id: "xccdf_org.ssgproject.content_profile_stig"
+
 rhel_stig_with_rollback_stig_audit_dir: "/opt/stig_audit"
 rhel_stig_with_rollback_stig_work_dir: "/opt/stig_work"
 

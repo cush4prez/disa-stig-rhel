@@ -1,6 +1,14 @@
 ---
+# ⚠️  DEPRECATED: This playbook is deprecated in favor of rhel_benchmark_hardening.yml
+# The new playbook supports DISA STIG, CIS Benchmarks, and custom profiles.
+# This file will be removed in a future release. Please update your automation.
+#
+# Migration: Replace rhel_stig_with_rollback.yml with rhel_benchmark_hardening.yml
+# All functionality is preserved - this is just a naming change for clarity.
+#
 # cspell:ignore STIG stig oscap xccdf scap arf
-- name: RHEL DISA STIG Hardening with Rollback Support
+
+- name: RHEL DISA STIG Hardening with Rollback Support (DEPRECATED)
   hosts: all
   become: true
   gather_facts: true

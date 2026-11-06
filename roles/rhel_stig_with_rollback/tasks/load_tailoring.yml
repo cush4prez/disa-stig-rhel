@@ -1,6 +1,7 @@
 ---
-# Load organization-specific STIG tailoring variables
+# Load organization-specific security benchmark tailoring variables
 # This task loads custom security control variables from tailoring files
+# Works with any benchmark (STIG, CIS, custom)
 
 - name: Check if tailoring profile is specified
   ansible.builtin.set_fact:
@@ -12,7 +13,7 @@
   ansible.builtin.debug:
     msg:
       - "========================================================================="
-      - "STIG TAILORING CONFIGURATION"
+      - "SECURITY BENCHMARK TAILORING CONFIGURATION"
       - "========================================================================="
       - >-
         {% if rhel_stig_with_rollback_use_tailoring %}

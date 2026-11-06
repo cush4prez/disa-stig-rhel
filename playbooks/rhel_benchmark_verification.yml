@@ -1,0 +1,13 @@
+---
+# RHEL Security Benchmark Verification Playbook
+# Verifies compliance with selected security benchmark
+
+- name: RHEL Security Benchmark Verification
+  hosts: all
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: rhel_stig_with_rollback
+      # Only run verification phase
+      rhel_stig_with_rollback_apply_remediations: false

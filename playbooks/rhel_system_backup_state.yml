@@ -1,0 +1,14 @@
+---
+# RHEL System Backup State (Generic - not benchmark-specific)
+# Creates a comprehensive system backup including configs, services, and state
+
+- name: RHEL System Backup State
+  hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Create system backup
+      ansible.builtin.include_role:
+        name: rhel_stig_with_rollback
+        tasks_from: phase2_backup.yml

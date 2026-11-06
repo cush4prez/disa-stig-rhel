@@ -1,0 +1,27 @@
+---
+# Example: CIS Server Level 1 Hardening
+# This demonstrates how to apply CIS Server L1 benchmark instead of DISA STIG
+
+- name: Apply CIS Server Level 1 Benchmark
+  hosts: all
+  become: true
+
+  roles:
+    - role: rhel_stig_with_rollback
+      # Use CIS Server Level 1 instead of DISA STIG
+      rhel_stig_with_rollback_benchmark_profile: cis_server_l1
+
+      # Apply remediations (set to false for audit-only)
+      rhel_stig_with_rollback_apply_remediations: true
+
+      # Enable automatic rollback on failure
+      rhel_stig_with_rollback_auto_rollback_on_failure: true
+
+      # Optional: Use organization tailoring
+      # rhel_stig_with_rollback_tailoring_profile: myorg
+
+      # Optional: Selective mode - only apply specific CIS rules
+      # rhel_stig_with_rollback_stig_rules_to_apply:
+      #   - service_auditd_enabled
+      #   - package_aide_installed
+      #   - accounts_password_minlen_login_defs

@@ -1,7 +1,7 @@
 ---
-# Phase 4: Generate and apply STIG remediations (selective or full)
+# Phase 4: Generate and apply security remediations (selective or full)
 
-- name: Apply STIG hardening
+- name: Apply security hardening
   when: rhel_stig_with_rollback_apply_remediations
   block:
   - name: Check if selective remediation is requested
@@ -15,11 +15,11 @@
       # cspell:ignore STIG stig
       msg:
         - "========================================================================="
-        - "{% if rhel_stig_with_rollback_selective_mode %}SELECTIVE STIG REMEDIATION{% else %}FULL STIG REMEDIATION{% endif %}"
+        - "{% if rhel_stig_with_rollback_selective_mode %}SELECTIVE {{ rhel_stig_with_rollback_benchmark_profile | default('stig') | upper }} REMEDIATION{% else %}FULL {{ rhel_stig_with_rollback_benchmark_profile | default('stig') | upper }} REMEDIATION{% endif %}"
         - "========================================================================="
         - >-
           {{ 'Applying ' ~ (rhel_stig_with_rollback_stig_rules_to_apply | length) ~ ' selected rules'
-              if rhel_stig_with_rollback_selective_mode else 'Applying all STIG rules from profile' }}
+              if rhel_stig_with_rollback_selective_mode else 'Applying all ' ~ (rhel_stig_with_rollback_benchmark_profile | default('stig') | upper) ~ ' rules from profile' }}
         - >-
           {% if rhel_stig_with_rollback_selective_mode -%}
           Selected rules:{% for rule in
@@ -27,7 +27,7 @@
           {%- endif %}
         - "========================================================================="
 
-  - name: Generate full STIG remediation script from SCAP data stream
+  - name: Generate full security remediation script from SCAP data stream
     ansible.builtin.command: >
       oscap xccdf generate fix
       --fix-type ansible

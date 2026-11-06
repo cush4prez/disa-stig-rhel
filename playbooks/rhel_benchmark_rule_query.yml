@@ -1,0 +1,22 @@
+---
+# RHEL Security Benchmark Rule Query
+# Query status of specific security rules from selected benchmark
+
+- name: RHEL Security Benchmark Rule Query
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars_prompt:
+    - name: query_rule_ids
+      prompt: "Enter comma-separated security rule IDs to query"
+      private: false
+
+  pre_tasks:
+    - name: Convert input to list
+      ansible.builtin.set_fact:
+        rhel_stig_with_rollback_stig_rules_to_apply: "{{ query_rule_ids.split(',') | map('trim') | select | list }}"
+
+  roles:
+    - role: rhel_stig_with_rollback
+      rhel_stig_with_rollback_apply_remediations: false

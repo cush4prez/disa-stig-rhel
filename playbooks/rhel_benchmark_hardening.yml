@@ -1,0 +1,30 @@
+---
+# RHEL Security Benchmark Hardening with Rollback Support
+# Supports: DISA STIG, CIS Benchmarks (L1/L2 Server/Workstation), and custom SCAP profiles
+# cspell:ignore oscap xccdf scap arf stig
+
+- name: RHEL Security Benchmark Hardening with Rollback Support
+  hosts: all
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    # Process AAP survey inputs (for survey-based deployments)
+    - name: Convert survey inputs to role variables (AAP 2.7)
+      ansible.builtin.set_fact:
+        rhel_stig_with_rollback_stig_rules_to_apply: >-
+          {% if stig_audit_mode is defined and (stig_audit_mode == 'selective') %}
+          {{ stig_rules_input.split(',') | map('trim') | select | list }}
+          {% else %}
+          []
+          {% endif %}
+      when: stig_audit_mode is defined
+
+  roles:
+    - role: rhel_stig_with_rollback
+      # All configuration comes from survey, inventory, or role defaults
+      # Examples:
+      # rhel_stig_with_rollback_benchmark_profile: stig|cis_server_l1|cis_server_l2|cis_workstation_l1|cis_workstation_l2
+      # rhel_stig_with_rollback_apply_remediations: true|false
+      # rhel_stig_with_rollback_auto_rollback_on_failure: true|false
+      # rhel_stig_with_rollback_tailoring_profile: myorg

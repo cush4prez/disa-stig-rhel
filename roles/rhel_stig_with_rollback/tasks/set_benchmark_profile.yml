@@ -1,0 +1,32 @@
+---
+# Map friendly benchmark profile names to full SCAP profile IDs
+# This allows users to specify simple names like 'cis_server_l1' instead of
+# 'xccdf_org.ssgproject.content_profile_cis_server_l1'
+
+- name: Map benchmark profile to full SCAP profile ID
+  ansible.builtin.set_fact:
+    rhel_stig_with_rollback_stig_profile_id: >-
+      {%- if rhel_stig_with_rollback_benchmark_profile == 'stig' -%}
+      xccdf_org.ssgproject.content_profile_stig
+      {%- elif rhel_stig_with_rollback_benchmark_profile == 'cis' -%}
+      xccdf_org.ssgproject.content_profile_cis
+      {%- elif rhel_stig_with_rollback_benchmark_profile == 'cis_server_l1' -%}
+      xccdf_org.ssgproject.content_profile_cis_server_l1
+      {%- elif rhel_stig_with_rollback_benchmark_profile == 'cis_server_l2' -%}
+      xccdf_org.ssgproject.content_profile_cis_server_l2
+      {%- elif rhel_stig_with_rollback_benchmark_profile == 'cis_workstation_l1' -%}
+      xccdf_org.ssgproject.content_profile_cis_workstation_l1
+      {%- elif rhel_stig_with_rollback_benchmark_profile == 'cis_workstation_l2' -%}
+      xccdf_org.ssgproject.content_profile_cis_workstation_l2
+      {%- elif rhel_stig_with_rollback_benchmark_profile == 'custom' -%}
+      {{ rhel_stig_with_rollback_stig_profile_id }}
+      {%- else -%}
+      xccdf_org.ssgproject.content_profile_stig
+      {%- endif -%}
+  when: rhel_stig_with_rollback_benchmark_profile is defined
+
+- name: Display selected benchmark profile
+  ansible.builtin.debug:
+    msg:
+      - "Benchmark Profile: {{ rhel_stig_with_rollback_benchmark_profile | default('stig') }}"
+      - "SCAP Profile ID: {{ rhel_stig_with_rollback_stig_profile_id }}"

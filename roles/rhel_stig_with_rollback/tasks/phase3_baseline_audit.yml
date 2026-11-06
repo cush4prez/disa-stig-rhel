@@ -1,7 +1,7 @@
 ---
 # Phase 3: Baseline audit (selective or full)
 
-- name: Create STIG working directories
+- name: Create security benchmark working directories
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
@@ -23,16 +23,17 @@
     msg:
       - "========================================================================="
       - >-
-        {% if rhel_stig_with_rollback_selective_mode %}SELECTIVE STIG AUDIT
-        {% else %}FULL STIG AUDIT{% endif %}
+        {% if rhel_stig_with_rollback_selective_mode %}SELECTIVE
+        {{ rhel_stig_with_rollback_benchmark_profile | default('stig') | upper }} AUDIT
+        {% else %}FULL {{ rhel_stig_with_rollback_benchmark_profile | default('stig') | upper }} AUDIT{% endif %}
       - "========================================================================="
       - >-
         {% if rhel_stig_with_rollback_selective_mode %}
         Auditing {{ rhel_stig_with_rollback_stig_rules_to_apply | length }} selected rules only
-        {% else %}Auditing all STIG rules from profile{% endif %}
+        {% else %}Auditing all rules from {{ rhel_stig_with_rollback_benchmark_profile | default('stig') | upper }} profile{% endif %}
       - "========================================================================="
 
-- name: Run baseline STIG audit (full or selective)
+- name: Run baseline security audit (full or selective)
   ansible.builtin.command: >
     oscap xccdf eval
     --profile {{ rhel_stig_with_rollback_stig_profile_id }}

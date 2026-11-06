@@ -1,0 +1,26 @@
+---
+# Diagnose Security Benchmark Remediation
+# Tests remediation script generation for selected benchmark
+
+- name: Diagnose Security Benchmark Remediation
+  hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Display diagnostic notice
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================="
+          - "     Security Benchmark Remediation Diagnostic"
+          - "========================================================================="
+          - "This playbook tests remediation script generation methods"
+          - "No actual remediations will be applied"
+          - "========================================================================"
+
+    - name: Run diagnostic
+      ansible.builtin.include_role:
+        name: rhel_stig_with_rollback
+        tasks_from: phase4_remediation.yml
+      vars:
+        rhel_stig_with_rollback_apply_remediations: false

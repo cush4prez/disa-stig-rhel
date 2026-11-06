@@ -2,12 +2,25 @@
   "_comment": "AAP 2.7 does NOT support importing survey JSON files. This file is provided as a REFERENCE ONLY for manual survey creation through the AAP GUI. See AAP_COMPLETE_GUIDE.md for step-by-step instructions.",
   "_usage": "This JSON shows the survey structure but must be manually recreated in AAP GUI: Resources → Templates → [Template Name] → Survey → Add",
 
-  "name": "DISA STIG Configuration Survey",
-  "description": "Configure STIG audit and remediation options",
+  "name": "RHEL Security Benchmark Configuration Survey",
+  "description": "Configure security benchmark (STIG/CIS) audit and remediation options",
   "spec": [
     {
-      "question_name": "STIG Audit Mode",
-      "question_description": "Select whether to audit ALL STIG rules or only specific rules",
+      "question_name": "Security Benchmark Profile",
+      "question_description": "Select which security benchmark to apply: DISA STIG, CIS Server L1/L2, CIS Workstation L1/L2, or general CIS",
+      "required": true,
+      "type": "multiplechoice",
+      "variable": "rhel_stig_with_rollback_benchmark_profile",
+      "min": null,
+      "max": null,
+      "default": "stig",
+      "choices": "stig\ncis_server_l1\ncis_server_l2\ncis_workstation_l1\ncis_workstation_l2\ncis",
+      "new_question": true,
+      "_manual_setup_note": "In AAP GUI: Answer type = 'Multiple Choice (single select)', Options = 'stig', 'cis_server_l1', 'cis_server_l2', 'cis_workstation_l1', 'cis_workstation_l2', 'cis' on separate lines"
+    },
+    {
+      "question_name": "Audit Mode",
+      "question_description": "Select whether to audit ALL rules or only specific rules from the selected benchmark",
       "required": true,
       "type": "multiplechoice",
       "variable": "stig_audit_mode",
@@ -19,8 +32,8 @@
       "_manual_setup_note": "In AAP GUI: Answer type = 'Multiple Choice (single select)', Options = 'full' and 'selective' on separate lines"
     },
     {
-      "question_name": "STIG Rules to Audit (comma-separated, for selective mode)",
-      "question_description": "List specific STIG rules to audit. Only used when Audit Mode is 'selective'. Example: sysctl_crypto_fips_enabled,audit_rules_login_events,sshd_set_idle_timeout",
+      "question_name": "Security Rules to Audit (comma-separated, for selective mode)",
+      "question_description": "List specific security rules to audit from the selected benchmark. Only used when Audit Mode is 'selective'. Example: sysctl_crypto_fips_enabled,audit_rules_login_events,sshd_set_idle_timeout",
       "required": false,
       "type": "textarea",
       "variable": "stig_rules_input",
@@ -33,7 +46,7 @@
     },
     {
       "question_name": "Apply Remediations?",
-      "question_description": "Apply fixes to failed STIG rules? If false, performs audit only.",
+      "question_description": "Apply fixes to failed security rules? If false, performs audit only.",
       "required": true,
       "type": "multiplechoice",
       "variable": "rhel_stig_with_rollback_apply_remediations",
@@ -59,7 +72,7 @@
     },
     {
       "question_name": "Tailoring Profile (optional)",
-      "question_description": "Organization-specific tailoring profile name. Leave blank for DISA defaults. Example: myorg",
+      "question_description": "Organization-specific tailoring profile name. Leave blank for benchmark defaults. Example: myorg",
       "required": false,
       "type": "text",
       "variable": "rhel_stig_with_rollback_tailoring_profile",

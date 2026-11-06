@@ -1,13 +1,14 @@
-# RHEL DISA STIG Hardening with Rollback
+# RHEL Security Hardening with Rollback (STIG & CIS)
 
-Ansible automation for applying DISA STIG hardening to RHEL 8/9/10 systems with intelligent rollback protection and selective audit capabilities.
+Ansible automation for applying **DISA STIG** or **CIS Benchmarks** to RHEL 8/9/10 systems with intelligent rollback protection and selective audit capabilities.
 
 ## Features
 
-- ✅ **Selective or Full STIG Auditing** - Audit specific rules or all rules
+- ✅ **Multiple Benchmarks** - DISA STIG, CIS L1/L2 (Server/Workstation), or custom profiles
+- ✅ **Selective or Full Auditing** - Audit specific rules or all rules
 - ✅ **Ansible-based Remediation** - Native Ansible tasks (not bash scripts)
 - ✅ **Native XML Parsing** - No Python scripts, pure Ansible using community.general.xml
-- ✅ **Organization Tailoring** - Customize STIG variables for your organization
+- ✅ **Organization Tailoring** - Customize variables for your organization
 - ✅ **Automatic Backup** - Pre-hardening snapshots with disaster recovery
 - ✅ **Intelligent Rollback** - Auto-rollback on operational failures
 - ✅ **AAP 2.7 Integration** - Survey-based configuration for easy deployment
@@ -38,10 +39,25 @@ ansible-playbook -i inventory playbooks/site.yml
 Pass variables via extra vars or group_vars:
 
 ```bash
+# DISA STIG (default)
 ansible-playbook -i inventory playbooks/site.yml \
   -e rhel_stig_with_rollback_tailoring_profile=myorg \
   -e rhel_stig_with_rollback_apply_remediations=true
+
+# CIS Server Level 1
+ansible-playbook -i inventory playbooks/site.yml \
+  -e rhel_stig_with_rollback_benchmark_profile=cis_server_l1 \
+  -e rhel_stig_with_rollback_apply_remediations=true
+
+# CIS Server Level 2
+ansible-playbook -i inventory playbooks/site.yml \
+  -e rhel_stig_with_rollback_benchmark_profile=cis_server_l2 \
+  -e rhel_stig_with_rollback_apply_remediations=true
 ```
+
+**Available Benchmark Profiles**: `stig` (default), `cis`, `cis_server_l1`, `cis_server_l2`, `cis_workstation_l1`, `cis_workstation_l2`, `custom`
+
+See [docs/CIS_BENCHMARK_GUIDE.md](docs/CIS_BENCHMARK_GUIDE.md) for complete CIS configuration details.
 
 Or create your own minimal playbook:
 

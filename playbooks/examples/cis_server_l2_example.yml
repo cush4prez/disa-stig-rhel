@@ -1,0 +1,28 @@
+---
+# Example: CIS Server Level 2 Hardening
+# This demonstrates how to apply CIS Server L2 benchmark
+# NOTE: L2 is more restrictive than L1 and may impact functionality
+
+- name: Apply CIS Server Level 2 Benchmark
+  hosts: all
+  become: true
+
+  roles:
+    - role: rhel_stig_with_rollback
+      # Use CIS Server Level 2 (includes all L1 + additional controls)
+      rhel_stig_with_rollback_benchmark_profile: cis_server_l2
+
+      # Apply remediations (set to false for audit-only)
+      rhel_stig_with_rollback_apply_remediations: true
+
+      # Enable automatic rollback on failure (RECOMMENDED for L2)
+      rhel_stig_with_rollback_auto_rollback_on_failure: true
+
+      # Enable backup (STRONGLY RECOMMENDED for L2)
+      rhel_stig_with_rollback_enable_auto_backup: true
+
+      # Fetch backup to controller for disaster recovery
+      rhel_stig_with_rollback_fetch_to_controller: true
+
+      # Optional: Use organization tailoring
+      # rhel_stig_with_rollback_tailoring_profile: myorg

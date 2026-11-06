@@ -1,0 +1,120 @@
+---
+# Interactive Security Benchmark playbook with CLI prompts
+# Supports: DISA STIG, CIS Benchmarks, and custom SCAP profiles
+# For AAP 2.7, use rhel_benchmark_hardening.yml with the survey configuration
+
+- name: RHEL Security Benchmark Hardening (Interactive Mode)
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars_prompt:
+    - name: benchmark_profile_choice
+      prompt: |
+
+        ╔════════════════════════════════════════════════════════════════════════╗
+        ║                   SECURITY BENCHMARK SELECTION                         ║
+        ╚════════════════════════════════════════════════════════════════════════╝
+
+        Select security benchmark to apply:
+
+          [1] stig            - DISA STIG (default)
+          [2] cis_server_l1   - CIS Server Level 1
+          [3] cis_server_l2   - CIS Server Level 2
+          [4] cis_workstation_l1 - CIS Workstation Level 1
+          [5] cis_workstation_l2 - CIS Workstation Level 2
+          [6] cis             - CIS General Benchmark
+
+        Enter your choice (1-6)
+      private: false
+      default: "1"
+
+    - name: audit_mode_choice
+      prompt: |
+
+        ╔════════════════════════════════════════════════════════════════════════╗
+        ║                          AUDIT MODE SELECTION                          ║
+        ╚════════════════════════════════════════════════════════════════════════╝
+
+        Select audit mode:
+
+          [1] full      - Audit ALL rules from the selected benchmark (default)
+          [2] selective - Audit only specific rules you specify
+
+        Enter your choice (1 or 2)
+      private: false
+      default: "1"
+
+    - name: rules_input
+      prompt: |
+
+        ╔════════════════════════════════════════════════════════════════════════╗
+        ║                      SELECTIVE RULES (Optional)                        ║
+        ╚════════════════════════════════════════════════════════════════════════╝
+
+        Enter comma-separated list of security rule IDs to audit.
+        (Only applies if you selected 'selective' mode above)
+
+        Examples:
+          - sysctl_crypto_fips_enabled
+          - audit_rules_login_events,sshd_set_idle_timeout
+          - file_permissions_var_log_audit
+
+        Leave blank to skip (or if using 'full' mode)
+      private: false
+      default: ""
+
+    - name: apply_remediations_choice
+      prompt: |
+
+        ╔════════════════════════════════════════════════════════════════════════╗
+        ║                        REMEDIATION SETTINGS                            ║
+        ╚════════════════════════════════════════════════════════════════════════╝
+
+        Apply remediations automatically?
+
+          [1] yes - Apply remediations (default)
+          [2] no  - Audit only, do not remediate
+
+        Enter your choice (1 or 2)
+      private: false
+      default: "1"
+
+    - name: auto_rollback_choice
+      prompt: |
+
+        ╔════════════════════════════════════════════════════════════════════════╗
+        ║                         ROLLBACK SETTINGS                              ║
+        ╚════════════════════════════════════════════════════════════════════════╝
+
+        Automatically rollback if operational verification fails?
+
+          [1] yes - Auto rollback on failure (default, recommended)
+          [2] no  - Do not auto rollback
+
+        Enter your choice (1 or 2)
+      private: false
+      default: "1"
+
+  pre_tasks:
+    - name: Convert interactive inputs to role variables
+      ansible.builtin.set_fact:
+        rhel_stig_with_rollback_benchmark_profile: >-
+          {%- if benchmark_profile_choice == '1' -%}stig
+          {%- elif benchmark_profile_choice == '2' -%}cis_server_l1
+          {%- elif benchmark_profile_choice == '3' -%}cis_server_l2
+          {%- elif benchmark_profile_choice == '4' -%}cis_workstation_l1
+          {%- elif benchmark_profile_choice == '5' -%}cis_workstation_l2
+          {%- elif benchmark_profile_choice == '6' -%}cis
+          {%- else -%}stig{%- endif -%}
+        rhel_stig_with_rollback_stig_rules_to_apply: >-
+          {% if audit_mode_choice == '2' and rules_input | length > 0 %}
+          {{ rules_input.split(',') | map('trim') | select | list }}
+          {% else %}
+          []
+          {% endif %}
+        rhel_stig_with_rollback_apply_remediations: "{{ apply_remediations_choice == '1' }}"
+        rhel_stig_with_rollback_auto_rollback_on_failure: "{{ auto_rollback_choice == '1' }}"
+
+  roles:
+    - role: rhel_stig_with_rollback

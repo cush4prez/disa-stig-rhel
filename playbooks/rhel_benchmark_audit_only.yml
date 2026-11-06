@@ -1,0 +1,17 @@
+---
+# RHEL Security Benchmark Audit Only (NO REMEDIATIONS)
+# Supports: DISA STIG, CIS Benchmarks, and custom SCAP profiles
+
+- name: RHEL Security Benchmark Audit Only (NO REMEDIATIONS)
+  hosts: all
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: rhel_stig_with_rollback
+      # Force audit-only mode
+      rhel_stig_with_rollback_apply_remediations: false
+      # All other configuration comes from inventory or role defaults
+      # Examples:
+      # rhel_stig_with_rollback_benchmark_profile: stig|cis_server_l1|cis_server_l2
+      # rhel_stig_with_rollback_tailoring_profile: myorg

@@ -5,7 +5,7 @@
   ansible.builtin.debug:
     msg:
       - "========================================================================="
-      - "            RHEL {{ ansible_distribution_major_version }} DISA STIG HARDENING COMPLETE"
+      - "       RHEL {{ ansible_distribution_major_version }} {{ rhel_stig_with_rollback_benchmark_profile | default('stig') | upper }} SECURITY HARDENING COMPLETE"
       - "========================================================================="
       - "Target Host            : {{ inventory_hostname }}"
       - "RHEL Version           : {{ ansible_distribution_version }}"
