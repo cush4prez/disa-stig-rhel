@@ -33,11 +33,19 @@
     path: "{{ rhel_stig_with_rollback_scap_ds_path }}"
   register: rhel_stig_with_rollback_scap_stat
 
+- name: Load OS-specific variables
+  ansible.builtin.include_vars: "{{ lookup('ansible.builtin.first_found', params) }}"
+  vars:
+    params:
+      files:
+        - "{{ ansible_facts['distribution'] }}-{{ ansible_facts['distribution_major_version'] }}.yml"
+        - "{{ ansible_facts['os_family'] }}-{{ ansible_facts['distribution_major_version'] }}.yml"
+        - default.yml
+      paths:
+        - vars
+
 - name: Install SCAP content if missing
   ansible.builtin.dnf:
-    name:
-      - openscap-scanner
-      - scap-security-guide
-      - python39-lxml
+    name: "{{ scap_packages }}"
     state: present
   when: not rhel_stig_with_rollback_scap_stat.stat.exists

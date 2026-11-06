@@ -1,0 +1,4 @@
+scap_packages:
+  - openscap-scanner
+  - scap-security-guide
+  - python3-lxml
