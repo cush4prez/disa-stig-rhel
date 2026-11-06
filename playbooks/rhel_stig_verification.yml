@@ -280,9 +280,9 @@
    # - name: Email results as html
    #   community.general.mail:
    #     to: "{{ report_reciepient_list }}"
-   #     host: "mailout.***REMOVED***"
+   #     host: "mailout.DOMAIN_NAME"
    #     port: 25
-   #     from: "aapnotifications@uscis@***REMOVED***"
+   #     from: "aapnotifications@uscis@DOMAIN_NAME"
    #     subject: "RHEL 8 DISA STIG Audit Results for {{ inventory_hostname }}"
    #     body: "Please find the attached HTML report for the recent DISA STIG audit."
    #     attach:
