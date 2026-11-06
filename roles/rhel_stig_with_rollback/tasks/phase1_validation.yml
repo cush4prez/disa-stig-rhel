@@ -19,9 +19,11 @@
       files:
         - "{{ ansible_facts['distribution'] }}-{{ ansible_facts['distribution_major_version'] }}.yml"
         - "{{ ansible_facts['os_family'] }}-{{ ansible_facts['distribution_major_version'] }}.yml"
-        - default.yml
+        - main.yml
       paths:
-        - vars
+        - "{{ role_path | default(playbook_dir) }}/vars"
+        - "vars"
+      skip: true
 
 - name: Check Python compatibility for native parsing
   ansible.builtin.include_tasks: check_python_compatibility.yml
