@@ -39,7 +39,7 @@ This role is fully compatible with AAP 2.7 and provides:
 - **Git repository** containing this project
 - **RHEL hosts** to harden (RHEL 8, 9, or 10)
 - **Credentials** with sudo/root access to target hosts
-- **RHEL 8 hosts** has python 3.9 or later
+- **RHEL 8 hosts** have python 3.9 or later
 
 ### Recommended
 
