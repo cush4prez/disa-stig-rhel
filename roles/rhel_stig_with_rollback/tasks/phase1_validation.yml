@@ -25,7 +25,9 @@
 
 - name: Fail if required variable file is missing
   ansible.builtin.fail:
-    msg: "Variable file {{ role_path }}/vars/{{ ansible_facts['distribution'] }}-{{ ansible_facts['distribution_major_version'] }}.yml was not found on the controller!"
+    msg: >-
+      Variable file {{ role_path }}/vars/{{ ansible_facts['distribution'] }}-{{
+      ansible_facts['distribution_major_version'] }}.yml was not found on the controller!
   when: not rhel_os_var_stat.stat.exists
 
 - name: Verify loaded SCAP packages
@@ -49,7 +51,11 @@
       - "SCAP Profile ID    : {{ rhel_stig_with_rollback_stig_profile_id | default('Not Set') }}"
       - "Auto Backup        : {{ 'Enabled' if (rhel_stig_with_rollback_enable_auto_backup | default(false)) else 'Disabled' }}"
       - "Auto Rollback      : {{ 'Enabled' if (rhel_stig_with_rollback_auto_rollback_on_failure | default(false)) else 'Disabled' }}"
-      - "Backup Location    : {{ rhel_stig_with_rollback_backup_root | default('/opt/stig_backups') }}/{{ rhel_stig_with_rollback_backup_name | default('pre_stig_backup') }}.tar.gz"
+      - >-
+        Backup Location    : {{
+        rhel_stig_with_rollback_backup_root | default('/opt/stig_backups')
+        }}/{{ rhel_stig_with_rollback_backup_name | default('pre_stig_backup')
+        }}.tar.gz
       - "========================================================================="
 
 - name: Verify SCAP content exists
