@@ -12,27 +12,26 @@
       {{ ansible_facts['distribution_version'] | default('') }}
     success_msg: "RHEL {{ ansible_facts['distribution_major_version'] }} detected - proceeding with STIG hardening"
 
-- name: Debug OS facts and path resolution
-  ansible.builtin.debug:
-    msg:
-      - "Distribution fact        : '{{ ansible_facts['distribution'] }}'"
-      - "Major version fact       : '{{ ansible_facts['distribution_major_version'] }}'"
-      - "Target filename expected : '{{ ansible_facts['distribution'] }}-{{ ansible_facts['distribution_major_version'] }}.yml'"
-      - "Resolved role_path       : '{{ role_path }}'"
-      - "Full expected path       : '{{ role_path }}/vars/{{ ansible_facts['distribution'] }}-{{ ansible_facts['distribution_major_version'] }}.yml'"
+- name: Check if OS-specific variable file exists on controller
+  ansible.builtin.stat:
+    path: "{{ role_path }}/vars/{{ ansible_facts['distribution'] }}-{{ ansible_facts['distribution_major_version'] }}.yml"
+  delegate_to: localhost
+  register: rhel_os_var_stat
 
 - name: Load OS-specific variables
-  ansible.builtin.include_vars: "{{ lookup('ansible.builtin.first_found', params) }}"
-  vars:
-    params:
-      files:
-        - "{{ ansible_facts['distribution'] }}-{{ ansible_facts['distribution_major_version'] }}.yml"
-        - "{{ ansible_facts['os_family'] }}-{{ ansible_facts['distribution_major_version'] }}.yml"
-        - main.yml
-      paths:
-        - "{{ role_path | default(playbook_dir) }}/vars"
-        - "vars"
-      skip: true
+  ansible.builtin.include_vars:
+    file: "{{ role_path }}/vars/{{ ansible_facts['distribution'] }}-{{ ansible_facts['distribution_major_version'] }}.yml"
+  when: rhel_os_var_stat.stat.exists
+
+- name: Fail if required variable file is missing
+  ansible.builtin.fail:
+    msg: "Variable file {{ role_path }}/vars/{{ ansible_facts['distribution'] }}-{{ ansible_facts['distribution_major_version'] }}.yml was not found on the controller!"
+  when: not rhel_os_var_stat.stat.exists
+
+- name: Verify loaded SCAP packages
+  ansible.builtin.debug:
+    var: scap_packages
+    verbosity: 1
 
 - name: Check Python compatibility for native parsing
   ansible.builtin.include_tasks: check_python_compatibility.yml
@@ -50,7 +49,7 @@
       - "SCAP Profile ID    : {{ rhel_stig_with_rollback_stig_profile_id | default('Not Set') }}"
       - "Auto Backup        : {{ 'Enabled' if (rhel_stig_with_rollback_enable_auto_backup | default(false)) else 'Disabled' }}"
       - "Auto Rollback      : {{ 'Enabled' if (rhel_stig_with_rollback_auto_rollback_on_failure | default(false)) else 'Disabled' }}"
-      - "Backup Location    : {{ rhel_stig_with_rollback_backup_root | default('/var/tmp') }}/{{ rhel_stig_with_rollback_backup_name | default('stig_backup') }}.tar.gz"
+      - "Backup Location    : {{ rhel_stig_with_rollback_backup_root | default('/opt/stig_backups') }}/{{ rhel_stig_with_rollback_backup_name | default('pre_stig_backup') }}.tar.gz"
       - "========================================================================="
 
 - name: Verify SCAP content exists
@@ -62,6 +61,4 @@
   ansible.builtin.package:
     name: "{{ scap_packages }}"
     state: present
-  when:
-    - not rhel_stig_with_rollback_scap_stat.stat.exists
-    - scap_packages is defined
+  when: not rhel_stig_with_rollback_scap_stat.stat.exists
