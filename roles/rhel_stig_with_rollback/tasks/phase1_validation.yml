@@ -12,6 +12,15 @@
       {{ ansible_facts['distribution_version'] | default('') }}
     success_msg: "RHEL {{ ansible_facts['distribution_major_version'] }} detected - proceeding with STIG hardening"
 
+- name: Debug OS facts and path resolution
+  ansible.builtin.debug:
+    msg:
+      - "Distribution fact        : '{{ ansible_facts['distribution'] }}'"
+      - "Major version fact       : '{{ ansible_facts['distribution_major_version'] }}'"
+      - "Target filename expected : '{{ ansible_facts['distribution'] }}-{{ ansible_facts['distribution_major_version'] }}.yml'"
+      - "Resolved role_path       : '{{ role_path }}'"
+      - "Full expected path       : '{{ role_path }}/vars/{{ ansible_facts['distribution'] }}-{{ ansible_facts['distribution_major_version'] }}.yml'"
+
 - name: Load OS-specific variables
   ansible.builtin.include_vars: "{{ lookup('ansible.builtin.first_found', params) }}"
   vars:
