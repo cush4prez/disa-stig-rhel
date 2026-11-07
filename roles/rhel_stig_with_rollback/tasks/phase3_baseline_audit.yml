@@ -167,12 +167,22 @@
     rhel_stig_with_rollback_rules_to_remediate: []
   when: not rhel_stig_with_rollback_selective_mode
 
+- name: Normalize baseline compliance score value
+  ansible.builtin.set_fact:
+    rhel_stig_with_rollback_compliance_score_display: >-
+      {{
+        (rhel_stig_with_rollback_baseline_score.stdout | default(rhel_stig_with_rollback_baseline_score))
+        if (rhel_stig_with_rollback_baseline_score is mapping and 'stdout' in rhel_stig_with_rollback_baseline_score)
+        else (rhel_stig_with_rollback_oscap_compliance_score | default(rhel_stig_with_rollback_baseline_score | default('0.0')))
+      }}
+
 - name: Display baseline compliance score
   ansible.builtin.debug:
     msg:
       - >-
         {% if rhel_stig_with_rollback_selective_mode %}Selected rules compliance
-        {% else %}Current STIG compliance{% endif %}: {{ rhel_stig_with_rollback_baseline_score.stdout }}%
+        {% else %}Current STIG compliance{% endif %}: {{ rhel_stig_with_rollback_compliance_score_display | string | trim }}%
       - >-
         {% if rhel_stig_with_rollback_selective_mode %}
-        Rules to remediate: {{ rhel_stig_with_rollback_rules_to_remediate | length }}{% endif %}
+        Rules to remediate: {{ rhel_stig_with_rollback_rules_to_remediate | default([]) | length }}{% endif %}
+
