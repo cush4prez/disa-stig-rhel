@@ -16,7 +16,9 @@
   ansible.builtin.set_fact:
     rhel_stig_with_rollback_selective_mode: >-
       {{
-        (rhel_stig_with_rollback_stig_rules_to_apply | default([]) | list | select('truthy') | list | length) > 0
+        (stig_audit_mode | default('full') | lower == 'selective') and
+        (rhel_stig_with_rollback_stig_rules_to_apply is defined) and
+        (rhel_stig_with_rollback_stig_rules_to_apply | string | trim not in ['', '[]', 'none', 'null'])
       }}
 
 - name: Display audit mode
