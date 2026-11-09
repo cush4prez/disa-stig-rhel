@@ -31,6 +31,13 @@
       register: rhel_stig_with_rollback_oscap_results_xml
       failed_when: false
 
+    - name: Debug OSCAP raw XML matches structure
+      ansible.builtin.debug:
+        msg:
+          - "Matches count : {{ rhel_stig_with_rollback_oscap_results_xml.matches | default([]) | length }}"
+          - "First element : {{ rhel_stig_with_rollback_oscap_results_xml.matches[0] if (rhel_stig_with_rollback_oscap_results_xml.matches | default([]) | length > 0) else 'EMPTY' }}"
+          - "First type    : {{ (rhel_stig_with_rollback_oscap_results_xml.matches[0] | type_debug) if (rhel_stig_with_rollback_oscap_results_xml.matches | default([]) | length > 0) else 'N/A' }}"
+
     - name: Extract raw result strings into a flat list
       ansible.builtin.set_fact:
         rhel_stig_raw_results: >-
@@ -71,6 +78,14 @@
 
     - name: Display OSCAP parsing results
       ansible.builtin.debug:
+        msg:
+          - "Pass count: {{ rhel_stig_with_rollback_oscap_pass_count }}"
+          - "Fail count: {{ rhel_stig_with_rollback_oscap_fail_count }}"
+          - "Not applicable count: {{ rhel_stig_with_rollback_oscap_notapplicable_count }}"
+          - "Not checked count: {{ rhel_stig_with_rollback_oscap_notchecked_count }}"
+          - "Error count: {{ rhel_stig_with_rollback_oscap_error_count }}"
+          - "Checked rules: {{ rhel_stig_with_rollback_oscap_checked_rules }}"
+          - "Compliance score: {{ rhel_stig_with_rollback_oscap_compliance_score }}"
         msg:
           - "OSCAP Compliance Calculation:"
           - "  Pass: {{ rhel_stig_with_rollback_oscap_pass_count }}"
