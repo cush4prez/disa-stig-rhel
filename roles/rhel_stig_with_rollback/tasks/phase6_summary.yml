@@ -1,6 +1,29 @@
 ---
 # Phase 6: Final summary and rollback instructions
 
+- name: Normalize score variables for summary display
+  ansible.builtin.set_fact:
+    summary_baseline_score: >-
+      {{
+        rhel_stig_with_rollback_baseline_score_val
+        if rhel_stig_with_rollback_baseline_score_val is defined
+        else (
+          rhel_stig_with_rollback_baseline_score.stdout
+          if (rhel_stig_with_rollback_baseline_score is defined and 'stdout' in rhel_stig_with_rollback_baseline_score)
+          else 'N/A'
+        )
+      }}
+    summary_post_score: >-
+      {{
+        rhel_stig_with_rollback_post_score_val
+        if rhel_stig_with_rollback_post_score_val is defined
+        else (
+          rhel_stig_with_rollback_post_score.stdout
+          if (rhel_stig_with_rollback_post_score is defined and 'stdout' in rhel_stig_with_rollback_post_score)
+          else 'N/A'
+        )
+      }}
+
 - name: Display hardening summary
   ansible.builtin.debug:
     msg:
@@ -9,15 +32,13 @@
       - "========================================================================="
       - "Target Host            : {{ inventory_hostname }}"
       - "RHEL Version           : {{ ansible_facts['distribution_version'] }}"
-      - "Baseline Compliance    : {{ (rhel_stig_with_rollback_baseline_score.stdout | default('N/A')) if (rhel_stig_with_rollback_baseline_score is defined and 'stdout' in rhel_stig_with_rollback_baseline_score) else 'N/A' }}%"
+      - "Baseline Compliance    : {{ summary_baseline_score }}%"
       - >-
-        {% if rhel_stig_with_rollback_apply_remediations | default(false) and rhel_stig_with_rollback_post_score is defined and 'stdout' in rhel_stig_with_rollback_post_score %}
-        Post-Hardening Compliance : {{ rhel_stig_with_rollback_post_score.stdout }}%{% endif %}
+        {% if rhel_stig_with_rollback_apply_remediations | default(false) and summary_post_score != 'N/A' %}
+        Post-Hardening Compliance : {{ summary_post_score }}%{% endif %}
       - >-
-        {% if rhel_stig_with_rollback_apply_remediations | default(false) and
-              rhel_stig_with_rollback_post_score is defined and 'stdout' in rhel_stig_with_rollback_post_score and
-              rhel_stig_with_rollback_baseline_score is defined and 'stdout' in rhel_stig_with_rollback_baseline_score %}
-        Compliance Improvement : +{{ (rhel_stig_with_rollback_post_score.stdout | float - rhel_stig_with_rollback_baseline_score.stdout | float) | round(2) }}%{% endif %}
+        {% if rhel_stig_with_rollback_apply_remediations | default(false) and summary_post_score != 'N/A' and summary_baseline_score != 'N/A' %}
+        Compliance Improvement : +{{ (summary_post_score | float - summary_baseline_score | float) | round(2) }}%{% endif %}
       - "-------------------------------------------------------------------------"
       - "Backup Archive         : {{ rhel_stig_with_rollback_backup_archive | default('Not created') }}"
       - >-
