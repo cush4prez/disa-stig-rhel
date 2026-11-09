@@ -4,11 +4,14 @@
 - name: Apply STIG hardening
   when: rhel_stig_with_rollback_apply_remediations
   block:
-  - name: Check if selective remediation is requested
+  - name: Check if selective audit is requested
     ansible.builtin.set_fact:
       rhel_stig_with_rollback_selective_mode: >-
-        {{ rhel_stig_with_rollback_stig_rules_to_apply is defined and
-            rhel_stig_with_rollback_stig_rules_to_apply | length > 0 }}
+        {{
+          (stig_audit_mode | default('full') | lower == 'selective') and
+          (rhel_stig_with_rollback_stig_rules_to_apply is defined) and
+          (rhel_stig_with_rollback_stig_rules_to_apply | string | trim not in ['', '[]', 'none', 'null'])
+        }}
 
   - name: Display remediation mode
     ansible.builtin.debug:

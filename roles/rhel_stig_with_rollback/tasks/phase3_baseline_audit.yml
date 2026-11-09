@@ -185,4 +185,3 @@
       - >-
         {% if rhel_stig_with_rollback_selective_mode %}
         Rules to remediate: {{ rhel_stig_with_rollback_rules_to_remediate | default([]) | length }}{% endif %}
-
