@@ -65,7 +65,8 @@
     - name: Set baseline score variable (native)
       ansible.builtin.set_fact:
         rhel_stig_with_rollback_baseline_score:
-          stdout: "{{ rhel_stig_with_rollback_oscap_compliance_score }}"
+        stdout: "{{ rhel_stig_with_rollback_oscap_compliance_score }}"
+        rhel_stig_with_rollback_baseline_score_val: "{{ rhel_stig_with_rollback_oscap_compliance_score }}"
 
 - name: Parse baseline audit results (Python script - deprecated)
   when:
