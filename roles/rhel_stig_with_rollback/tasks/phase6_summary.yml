@@ -5,45 +5,34 @@
   ansible.builtin.debug:
     msg:
       - "========================================================================="
-      - "            RHEL {{ ansible_distribution_major_version }} DISA STIG HARDENING COMPLETE"
+      - "            RHEL {{ ansible_facts['distribution_major_version'] }} DISA STIG HARDENING COMPLETE"
       - "========================================================================="
       - "Target Host            : {{ inventory_hostname }}"
-      - "RHEL Version           : {{ ansible_distribution_version }}"
-      - "Baseline Compliance    : {{ rhel_stig_with_rollback_baseline_score.stdout | default('N/A') }}%"
+      - "RHEL Version           : {{ ansible_facts['distribution_version'] }}"
+      - "Baseline Compliance    : {{ (rhel_stig_with_rollback_baseline_score.stdout | default('N/A')) if (rhel_stig_with_rollback_baseline_score is defined and 'stdout' in rhel_stig_with_rollback_baseline_score) else 'N/A' }}%"
       - >-
-        {% if rhel_stig_with_rollback_apply_remediations and rhel_stig_with_rollback_post_score is defined %}
+        {% if rhel_stig_with_rollback_apply_remediations | default(false) and rhel_stig_with_rollback_post_score is defined and 'stdout' in rhel_stig_with_rollback_post_score %}
         Post-Hardening Compliance : {{ rhel_stig_with_rollback_post_score.stdout }}%{% endif %}
       - >-
-        {% if rhel_stig_with_rollback_apply_remediations and rhel_stig_with_rollback_post_score is defined
-        and rhel_stig_with_rollback_baseline_score is defined %}
-        Compliance Improvement : +{{ (rhel_stig_with_rollback_post_score.stdout | float -
-        rhel_stig_with_rollback_baseline_score.stdout | float) | round(2) }}%{% endif %}
+        {% if rhel_stig_with_rollback_apply_remediations | default(false) and
+              rhel_stig_with_rollback_post_score is defined and 'stdout' in rhel_stig_with_rollback_post_score and
+              rhel_stig_with_rollback_baseline_score is defined and 'stdout' in rhel_stig_with_rollback_baseline_score %}
+        Compliance Improvement : +{{ (rhel_stig_with_rollback_post_score.stdout | float - rhel_stig_with_rollback_baseline_score.stdout | float) | round(2) }}%{% endif %}
       - "-------------------------------------------------------------------------"
       - "Backup Archive         : {{ rhel_stig_with_rollback_backup_archive | default('Not created') }}"
       - >-
         Baseline Report        :
         {{ rhel_stig_with_rollback_stig_audit_dir }}/baseline_{{ rhel_stig_with_rollback_backup_timestamp }}.html
       - >-
-        {% if rhel_stig_with_rollback_apply_remediations %}Post-Hardening Report   :
+        {% if rhel_stig_with_rollback_apply_remediations | default(false) %}Post-Hardening Report   :
         {{ rhel_stig_with_rollback_stig_audit_dir }}/post_hardening_{{ rhel_stig_with_rollback_backup_timestamp }}.html{% endif %}
       - >-
-        {% if rhel_stig_with_rollback_apply_remediations %}Remediation Log        :
+        {% if rhel_stig_with_rollback_apply_remediations | default(false) %}Remediation Log        :
         {{ rhel_stig_with_rollback_stig_work_dir }}/remediation_{{ rhel_stig_with_rollback_backup_timestamp }}.log{% endif %}
-      - "========================================================================"
-      - ""
-      - "{% if rhel_stig_with_rollback_enable_auto_backup %}✓ ROLLBACK CAPABILITY ENABLED{% endif %}"
-      - ""
-      - "  ansible-playbook -i inventory playbooks/perform_rollback.yml \\"
-      - "    -e rhel_stig_with_rollback_backup_name={{ rhel_stig_with_rollback_backup_name }}"
-      - ""
-      - "Or restore manually:"
-      - ""
-      - "  cd {{ rhel_stig_with_rollback_backup_root }}"
-      - "  tar -xzf {{ rhel_stig_with_rollback_backup_name }}.tar.gz"
-      - "  # Review and selectively restore files from backup_{{ rhel_stig_with_rollback_backup_timestamp }}/"
       - "========================================================================"
 
 - name: Create rollback instructions file
+  when: rhel_stig_with_rollback_enable_auto_backup | default(false)
   ansible.builtin.copy:
     dest: "{{ rhel_stig_with_rollback_backup_root }}/ROLLBACK_INSTRUCTIONS.txt"
     mode: '0644'
@@ -54,7 +43,7 @@
 
       Hardening Date: {{ ansible_date_time.iso8601 }}
       Hostname: {{ ansible_hostname }}
-      Backup Archive: {{ rhel_stig_with_rollback_backup_archive }}
+      Backup Archive: {{ rhel_stig_with_rollback_backup_archive | default('Not created') }}
 
       ------------------------------------------------------------------------
       AUTOMATED ROLLBACK (RECOMMENDED)
@@ -121,4 +110,3 @@
          systemctl restart sshd
 
       ========================================================================
-  when: rhel_stig_with_rollback_enable_auto_backup
