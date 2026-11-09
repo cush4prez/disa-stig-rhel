@@ -15,8 +15,11 @@
 - name: Check if selective audit is requested
   ansible.builtin.set_fact:
     rhel_stig_with_rollback_selective_mode: >-
-      {{ rhel_stig_with_rollback_stig_rules_to_apply is defined and
-      rhel_stig_with_rollback_stig_rules_to_apply | length > 0 }}
+      {{
+        (stig_audit_mode | default('full') | lower == 'selective') and
+        (rhel_stig_with_rollback_stig_rules_to_apply is defined) and
+        (rhel_stig_with_rollback_stig_rules_to_apply | string | trim not in ['', '[]', 'none', 'null'])
+      }}
 
 - name: Display audit mode
   ansible.builtin.debug:
@@ -62,7 +65,8 @@
     - name: Set baseline score variable (native)
       ansible.builtin.set_fact:
         rhel_stig_with_rollback_baseline_score:
-          stdout: "{{ oscap_compliance_score }}"
+        stdout: "{{ rhel_stig_with_rollback_oscap_compliance_score }}"
+        rhel_stig_with_rollback_baseline_score_val: "{{ rhel_stig_with_rollback_oscap_compliance_score }}"
 
 - name: Parse baseline audit results (Python script - deprecated)
   when:
@@ -164,12 +168,21 @@
     rhel_stig_with_rollback_rules_to_remediate: []
   when: not rhel_stig_with_rollback_selective_mode
 
+- name: Normalize baseline compliance score value
+  ansible.builtin.set_fact:
+    rhel_stig_with_rollback_compliance_score_display: >-
+      {{
+        (rhel_stig_with_rollback_baseline_score.stdout | default(rhel_stig_with_rollback_baseline_score))
+        if (rhel_stig_with_rollback_baseline_score is mapping and 'stdout' in rhel_stig_with_rollback_baseline_score)
+        else (rhel_stig_with_rollback_oscap_compliance_score | default(rhel_stig_with_rollback_baseline_score | default('0.0')))
+      }}
+
 - name: Display baseline compliance score
   ansible.builtin.debug:
     msg:
       - >-
         {% if rhel_stig_with_rollback_selective_mode %}Selected rules compliance
-        {% else %}Current STIG compliance{% endif %}: {{ rhel_stig_with_rollback_baseline_score.stdout }}%
+        {% else %}Current STIG compliance{% endif %}: {{ rhel_stig_with_rollback_compliance_score_display | string | trim }}%
       - >-
         {% if rhel_stig_with_rollback_selective_mode %}
-        Rules to remediate: {{ rhel_stig_with_rollback_rules_to_remediate | length }}{% endif %}
+        Rules to remediate: {{ rhel_stig_with_rollback_rules_to_remediate | default([]) | length }}{% endif %}

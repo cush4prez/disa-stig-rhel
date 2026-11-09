@@ -1,6 +1,5 @@
 ---
 # Parse OSCAP compliance score from XML using native Ansible modules
-# Replaces: files/parse_oscap_score.py
 #
 # This calculates TRUE compliance based on pass/(pass+fail) counts
 # NOT the <score> element which includes notapplicable/notchecked
@@ -24,62 +23,97 @@
         src: "{{ oscap_xml_file }}"
       register: rhel_stig_with_rollback_oscap_xml_content
 
-    - name: Display XML content
-      ansible.builtin.debug:
-        var: rhel_stig_with_rollback_oscap_xml_content
-
-    - name: Parse XML and extract all result elements
+    - name: Parse XML and extract all rule-result result elements
       community.general.xml:
         xmlstring: "{{ rhel_stig_with_rollback_oscap_xml_content.content | b64decode }}"
-        xpath: "//*[local-name()='result']"
+        xpath: "//xccdf:rule-result/xccdf:result"
+        namespaces:
+          xccdf: "http://checklists.nist.gov/xccdf/1.2"
         content: text
       register: rhel_stig_with_rollback_oscap_results_xml
       failed_when: false
 
-    - name: Display parse xml
+    - name: Debug OSCAP raw XML matches structure
       ansible.builtin.debug:
-        var: rhel_stig_with_rollback_oscap_results_xml
+        msg:
+          - >-
+            Matches count :
+            {{ rhel_stig_with_rollback_oscap_results_xml.matches | default([]) | length }}
+          - >-
+            First element :
+            {{
+              rhel_stig_with_rollback_oscap_results_xml.matches[0]
+              if (
+                rhel_stig_with_rollback_oscap_results_xml.matches | default([]) | length > 0
+              )
+              else 'EMPTY'
+            }}
+          - >-
+            First type :
+            {{
+              (rhel_stig_with_rollback_oscap_results_xml.matches[0] | type_debug)
+              if (
+                rhel_stig_with_rollback_oscap_results_xml.matches | default([]) | length > 0
+              )
+              else 'N/A'
+            }}
 
-    # cspell:ignore notapplicable notchecked rhel stig oscap selectattr equalto
+    - name: Extract raw result strings into a flat list safely
+      ansible.builtin.set_fact:
+        rhel_stig_raw_results: >-
+          {%- set results = [] -%}
+          {%- for match in rhel_stig_with_rollback_oscap_results_xml.matches | default([]) -%}
+            {%- if match is string -%}
+              {%- set _ = results.append(match | trim) -%}
+            {%- elif match is mapping -%}
+              {%- if '{}' in match -%}
+                {%- set _ = results.append(match['{}'] | trim) -%}
+              {%- elif 'result' in match -%}
+                {%- set _ = results.append(match['result'] | trim) -%}
+              {%- elif 'text' in match -%}
+                {%- set _ = results.append(match['text'] | trim) -%}
+              {%- elif match.values() | length > 0 -%}
+                {%- set _ = results.append((match.values() | list)[0] | trim) -%}
+              {%- endif -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {{ results }}
+
     - name: Count pass/fail/not-applicable/not-checked results
       ansible.builtin.set_fact:
         rhel_stig_with_rollback_oscap_pass_count: >-
-          {{ (rhel_stig_with_rollback_oscap_results_xml.matches | default([])
-          | selectattr('text', 'defined') | selectattr('text', 'equalto', 'pass')
-          | list | length) | int }}
+          {{ (rhel_stig_raw_results | select('equalto', 'pass') | list | length) | int }}
         rhel_stig_with_rollback_oscap_fail_count: >-
-          {{ (rhel_stig_with_rollback_oscap_results_xml.matches | default([])
-          | selectattr('text', 'defined') | selectattr('text', 'equalto', 'fail')
-          | list | length) | int }}
+          {{ (rhel_stig_raw_results | select('equalto', 'fail') | list | length) | int }}
         rhel_stig_with_rollback_oscap_notapplicable_count: >-
-          {{ (rhel_stig_with_rollback_oscap_results_xml.matches | default([])
-          | selectattr('text', 'defined') | selectattr('text', 'equalto', 'notapplicable')
-          | list | length) | int }}
+          {{ (rhel_stig_raw_results | select('equalto', 'notapplicable') | list | length) | int }}
         rhel_stig_with_rollback_oscap_notchecked_count: >-
-          {{ (rhel_stig_with_rollback_oscap_results_xml.matches | default([])
-          | selectattr('text', 'defined') | selectattr('text', 'equalto', 'notchecked')
-          | list | length) | int }}
+          {{ (rhel_stig_raw_results | select('equalto', 'notchecked') | list | length) | int }}
         rhel_stig_with_rollback_oscap_error_count: >-
-          {{ (rhel_stig_with_rollback_oscap_results_xml.matches | default([])
-          | selectattr('text', 'defined') | selectattr('text', 'equalto', 'error')
-          | list | length) | int }}
-      when: rhel_stig_with_rollback_oscap_results_xml.matches is defined
+          {{ (rhel_stig_raw_results | select('equalto', 'error') | list | length) | int }}
 
     - name: Calculate total checked rules
       ansible.builtin.set_fact:
-        rhel_stig_with_rollback_oscap_checked_rules: "{{ (rhel_stig_with_rollback_oscap_pass_count | int) + (rhel_stig_with_rollback_oscap_fail_count | int) }}"
+        rhel_stig_with_rollback_oscap_checked_rules: >-
+          {{ (rhel_stig_with_rollback_oscap_pass_count | int) + (rhel_stig_with_rollback_oscap_fail_count | int) }}
 
     - name: Calculate compliance score
       ansible.builtin.set_fact:
         rhel_stig_with_rollback_oscap_compliance_score: >-
           {{ ((rhel_stig_with_rollback_oscap_pass_count | int /
-          rhel_stig_with_rollback_oscap_checked_rules | int * 100) | round(2)) | string }}
+               rhel_stig_with_rollback_oscap_checked_rules | int * 100) | round(2)) | string }}
       when: (rhel_stig_with_rollback_oscap_checked_rules | int) > 0
 
     - name: Set zero score if no rules checked
       ansible.builtin.set_fact:
         rhel_stig_with_rollback_oscap_compliance_score: "0.0"
       when: (rhel_stig_with_rollback_oscap_checked_rules | int) == 0
+
+    - name: Build compliance summary string
+      ansible.builtin.set_fact:
+        rhel_stig_with_rollback_oscap_compliance_summary: >-
+          {{ rhel_stig_with_rollback_oscap_pass_count }}/{{ rhel_stig_with_rollback_oscap_checked_rules }} =
+          {{ rhel_stig_with_rollback_oscap_compliance_score }}%
 
     - name: Display OSCAP parsing results
       ansible.builtin.debug:
@@ -91,6 +125,4 @@
           - "  Not Checked: {{ rhel_stig_with_rollback_oscap_notchecked_count }}"
           - "  Error: {{ rhel_stig_with_rollback_oscap_error_count }}"
           - "  Checked Rules: {{ rhel_stig_with_rollback_oscap_checked_rules }}"
-          - "  Compliance: {{ rhel_stig_with_rollback_oscap_pass_count }}/\
-                           {{ rhel_stig_with_rollback_oscap_checked_rules }} = \
-                           {{ rhel_stig_with_rollback_oscap_compliance_score }}%"
+          - "  Compliance: {{ rhel_stig_with_rollback_oscap_compliance_summary }}"

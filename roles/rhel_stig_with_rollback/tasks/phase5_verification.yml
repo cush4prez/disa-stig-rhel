@@ -80,19 +80,26 @@
     mode: '0755'
   when: rhel_stig_with_rollback_apply_remediations and rhel_stig_with_rollback_post_xml_stat.stat.exists
 
-- name: Parse post-hardening audit results
-  ansible.builtin.command: >-
-    {{ rhel_stig_with_rollback_stig_work_dir }}/parse_oscap_score.py
-    {{ rhel_stig_with_rollback_stig_audit_dir }}/post_hardening_{{ rhel_stig_with_rollback_backup_timestamp }}.xml
-  register: rhel_stig_with_rollback_post_score
-  changed_when: false
-  when: rhel_stig_with_rollback_apply_remediations and rhel_stig_with_rollback_post_xml_stat.stat.exists
+- name: Parse post-hardening audit results (native)
+  when:
+    - rhel_stig_with_rollback_apply_remediations | default(true)
+    - rhel_stig_with_rollback_post_xml_stat.stat.exists | default(false)
+    - rhel_stig_with_rollback_use_native_parsing | default(true)
+  block:
+    - name: Parse OSCAP score for post-hardening
+      ansible.builtin.include_tasks: parse_oscap_score.yml
+      vars:
+        oscap_xml_file: "{{ rhel_stig_with_rollback_stig_audit_dir }}/post_hardening_{{ rhel_stig_with_rollback_backup_timestamp }}.xml"
 
-- name: Set default post-hardening score if XML not found
+    - name: Set post score variables
+      ansible.builtin.set_fact:
+        rhel_stig_with_rollback_post_score:
+          stdout: "{{ rhel_stig_with_rollback_oscap_compliance_score }}"
+        rhel_stig_with_rollback_post_score_val: "{{ rhel_stig_with_rollback_oscap_compliance_score }}"
+
+- name: Set default post-hardening score if not already populated
   ansible.builtin.set_fact:
     rhel_stig_with_rollback_post_score:
       stdout: '0.0'
-  when: >-
-    rhel_stig_with_rollback_apply_remediations and
-    (not rhel_stig_with_rollback_post_xml_stat.stat.exists or
-    rhel_stig_with_rollback_post_score is not defined)
+    rhel_stig_with_rollback_post_score_val: '0.0'
+  when: rhel_stig_with_rollback_post_score_val is not defined

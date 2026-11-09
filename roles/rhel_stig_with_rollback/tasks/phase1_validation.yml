@@ -1,30 +1,56 @@
 ---
 # Phase 1: Pre-hardening validation
 
-- name: Check Python compatibility for native parsing
-  ansible.builtin.include_tasks: check_python_compatibility.yml
-  when: rhel_stig_with_rollback_use_native_parsing | default(true)
-
 - name: Verify supported RHEL version
   ansible.builtin.assert:
     that:
-      - ansible_distribution == "RedHat"
-      - ansible_distribution_major_version | int in [7, 8, 9, 10]
-    fail_msg: "This role supports RHEL 7, 8, 9, and 10 only. Detected: {{ ansible_distribution }} {{ ansible_distribution_version }}"
-    success_msg: "RHEL {{ ansible_distribution_major_version }} detected - proceeding with STIG hardening"
+      - ansible_facts['distribution'] == "RedHat"
+      - ansible_facts['distribution_major_version'] | int in [7, 8, 9, 10]
+    fail_msg: >-
+      This role supports RHEL 7, 8, 9, and 10 only.
+      Detected: {{ ansible_facts['distribution'] | default('Unknown') }}
+      {{ ansible_facts['distribution_version'] | default('') }}
+    success_msg: "RHEL {{ ansible_facts['distribution_major_version'] }} detected - proceeding with STIG hardening"
+
+- name: Check if OS-specific variable file exists on controller
+  ansible.builtin.stat:
+    path: "{{ role_path }}/vars/{{ ansible_facts['distribution'] }}-{{ ansible_facts['distribution_major_version'] }}.yml"
+  delegate_to: localhost
+  register: rhel_os_var_stat
+
+- name: Load OS-specific variables
+  ansible.builtin.include_vars:
+    file: "{{ role_path }}/vars/{{ ansible_facts['distribution'] }}-{{ ansible_facts['distribution_major_version'] }}.yml"
+  when: rhel_os_var_stat.stat.exists
+
+- name: Fail if required variable file is missing
+  ansible.builtin.fail:
+    msg: "Variable file {{ role_path }}/vars/{{ ansible_facts['distribution'] }}-{{ ansible_facts['distribution_major_version'] }}.yml was not found on the controller!"
+  when: not rhel_os_var_stat.stat.exists
+
+- name: Verify loaded SCAP packages
+  ansible.builtin.debug:
+    var: scap_packages
+    verbosity: 1
+
+- name: Check Python compatibility for native parsing
+  ansible.builtin.include_tasks: check_python_compatibility.yml
+  when: rhel_stig_with_rollback_use_native_parsing | default(true)
 
 - name: Display hardening plan
   ansible.builtin.debug:
     msg:
       - "========================================================================="
-      - "       RHEL {{ ansible_distribution_major_version }} DISA STIG HARDENING WITH ROLLBACK PROTECTION"
+      - "       RHEL {{ ansible_facts['distribution_major_version'] }} SECURITY HARDENING WITH ROLLBACK PROTECTION"
       - "========================================================================="
       - "Target Host        : {{ inventory_hostname }}"
-      - "RHEL Version       : {{ ansible_distribution_version }}"
-      - "Auto Backup        : {{ 'Enabled' if rhel_stig_with_rollback_enable_auto_backup else 'Disabled' }}"
-      - "Auto Rollback      : {{ 'Enabled' if rhel_stig_with_rollback_auto_rollback_on_failure else 'Disabled' }}"
-      - "Backup Location    : {{ rhel_stig_with_rollback_backup_root }}/{{ rhel_stig_with_rollback_backup_name }}.tar.gz"
-      - "========================================================================"
+      - "RHEL Version       : {{ ansible_facts['distribution_version'] }}"
+      - "Benchmark Profile  : {{ rhel_stig_with_rollback_benchmark_profile | default('stig') | upper }}"
+      - "SCAP Profile ID    : {{ rhel_stig_with_rollback_stig_profile_id | default('Not Set') }}"
+      - "Auto Backup        : {{ 'Enabled' if (rhel_stig_with_rollback_enable_auto_backup | default(false)) else 'Disabled' }}"
+      - "Auto Rollback      : {{ 'Enabled' if (rhel_stig_with_rollback_auto_rollback_on_failure | default(false)) else 'Disabled' }}"
+      - "Backup Location    : {{ rhel_stig_with_rollback_backup_root | default('/opt/stig_backups') }}/{{ rhel_stig_with_rollback_backup_name | default('pre_stig_backup') }}.tar.gz"
+      - "========================================================================="
 
 - name: Verify SCAP content exists
   ansible.builtin.stat:
@@ -32,10 +58,7 @@
   register: rhel_stig_with_rollback_scap_stat
 
 - name: Install SCAP content if missing
-  ansible.builtin.dnf:
-    name:
-      - openscap-scanner
-      - scap-security-guide
-      - python39-lxml
+  ansible.builtin.package:
+    name: "{{ scap_packages }}"
     state: present
   when: not rhel_stig_with_rollback_scap_stat.stat.exists
