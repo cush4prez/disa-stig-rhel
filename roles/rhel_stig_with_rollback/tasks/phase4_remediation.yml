@@ -128,12 +128,21 @@
         rhel_stig_with_rollback_remediation_playbook_stat.stat.size | default(0) < 100
 
     - name: Execute remediation playbook
-      ansible.builtin.include_tasks: "{{ rhel_stig_with_rollback_stig_work_dir }}/remediation_{{ rhel_stig_with_rollback_backup_timestamp }}.yml"
-      register: rhel_stig_with_rollback_remediation_result
-      failed_when: false
-      vars:
-        ansible_failed_result: {}
-      ignore_unreachable: true
+      block:
+        - name: Include remediation tasks
+          ansible.builtin.include_tasks: "{{ rhel_stig_with_rollback_stig_work_dir }}/remediation_{{ rhel_stig_with_rollback_backup_timestamp }}.yml"
+      rescue:
+        - name: Capture remediation errors
+          ansible.builtin.set_fact:
+            rhel_stig_with_rollback_remediation_result:
+              failed: true
+              msg: "{{ ansible_failed_result.msg | default('Remediation playbook encountered errors') }}"
+      always:
+        - name: Set remediation success if no errors
+          ansible.builtin.set_fact:
+            rhel_stig_with_rollback_remediation_result:
+              failed: false
+          when: rhel_stig_with_rollback_remediation_result is not defined
 
     - name: Check if system is still reachable after remediation
       ansible.builtin.wait_for_connection:
@@ -178,16 +187,16 @@
 
           REMEDIATION TYPE: Ansible Playbook
           PLAYBOOK: {{ rhel_stig_with_rollback_stig_work_dir }}/remediation_{{ rhel_stig_with_rollback_backup_timestamp }}.yml
-          STATUS: {% if rhel_stig_with_rollback_remediation_result is failed %}FAILED{% else %}COMPLETED{% endif %}
+          STATUS: {% if rhel_stig_with_rollback_remediation_result.failed | default(false) %}FAILED{% else %}COMPLETED{% endif %}
 
-          {% if rhel_stig_with_rollback_remediation_result is failed %}
+          {% if rhel_stig_with_rollback_remediation_result.failed | default(false) %}
           ERROR: {{ rhel_stig_with_rollback_remediation_result.msg | default('Unknown error') }}
           {% endif %}
         mode: '0644'
 
     - name: Check remediation status
       ansible.builtin.set_fact:
-        rhel_stig_with_rollback_remediation_failed: "{{ rhel_stig_with_rollback_remediation_result is failed }}"
+        rhel_stig_with_rollback_remediation_failed: "{{ rhel_stig_with_rollback_remediation_result.failed | default(false) }}"
 
     - name: Note remediation issues (not necessarily critical)
       ansible.builtin.debug:
