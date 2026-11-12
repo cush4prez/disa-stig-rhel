@@ -12,14 +12,31 @@
     - "{{ rhel_stig_with_rollback_stig_audit_dir }}"
     - "{{ rhel_stig_with_rollback_stig_work_dir }}"
 
+- name: Normalize audit mode and selected rules list
+  ansible.builtin.set_fact:
+    _effective_audit_mode: >-
+      {{
+        (stig_audit_mode | default(rhel_stig_with_rollback_stig_audit_mode | default('full')))
+        | string | trim | lower
+      }}
+    _normalized_rules_list: >-
+      {%- set raw = rhel_stig_with_rollback_stig_rules_to_apply | default([]) -%}
+      {%- if raw is string -%}
+        {{ raw.replace('\n', ',').split(',') | map('trim') | reject('equalto', '') | list }}
+      {%- elif raw is iterable -%}
+        {{ raw | map('trim') | reject('equalto', '') | list }}
+      {%- else -%}
+        []
+      {%- endif -%}
+
 - name: Check if selective audit is requested
   ansible.builtin.set_fact:
     rhel_stig_with_rollback_selective_mode: >-
       {{
-        (stig_audit_mode | default('full') | lower == 'selective') and
-        (rhel_stig_with_rollback_stig_rules_to_apply is defined) and
-        (rhel_stig_with_rollback_stig_rules_to_apply | string | trim not in ['', '[]', 'none', 'null'])
+        (_effective_audit_mode == 'selective') and
+        (_normalized_rules_list | length > 0)
       }}
+    rhel_stig_with_rollback_stig_rules_to_apply: "{{ _normalized_rules_list }}"
 
 - name: Display audit mode
   ansible.builtin.debug:
