@@ -220,15 +220,15 @@
   rescue:
     - name: Capture exception details
       ansible.builtin.set_fact:
-        rhel_stig_with_rollback_failure_reason: "Remediation script execution error"
+        rhel_stig_with_rollback_failure_reason: "{{ ansible_failed_result.msg | default('Remediation script execution error') }}"
         rhel_stig_with_rollback_failure_log_location: >-
           {{ rhel_stig_with_rollback_stig_work_dir }}/remediation_{{ rhel_stig_with_rollback_backup_timestamp }}.log
         rhel_stig_with_rollback_failure_type: "remediation_exception"
-        rhel_stig_with_rollback_failure_exit_code: "{{ rhel_stig_with_rollback_remediation_result.rc | default('unknown') }}"
+        rhel_stig_with_rollback_failure_exit_code: "{{ ansible_failed_result.rc | default('unknown') }}"
 
     - name: Note remediation exception
       ansible.builtin.debug:
         msg:
-          - "⚠️  Remediation script encountered an exception"
-          - "This does NOT automatically mean the system is broken."
-          - "The operational check will determine if rollback is needed."
+          - "⚠️  Remediation failed on task: {{ ansible_failed_task.name | default('unknown') }}"
+          - "Error message: {{ ansible_failed_result.msg | default('none') }}"
+          - "Stderr: {{ ansible_failed_result.stderr | default('none') }}"
