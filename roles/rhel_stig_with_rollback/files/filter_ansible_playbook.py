@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Filter OSCAP Ansible remediation playbook to include only specific STIG rules.
+Filter OSCAP-generated Ansible playbook to include only specific STIG rules.
 
-Usage: filter_remediation_playbook.py <input_playbook.yml> <output_playbook.yml> <comma_separated_rule_ids>
+Usage: filter_ansible_playbook.py <input_playbook.yml> <output_playbook.yml> <comma_separated_rule_ids>
 
 Example:
-  filter_remediation_playbook.py full.yml filtered.yml sysctl_crypto_fips_enabled,audit_rules_login_events
+  filter_ansible_playbook.py full.yml filtered.yml sysctl_crypto_fips_enabled,audit_rules_login_events
 """
 
 import sys
@@ -42,11 +42,12 @@ def extract_rule_id_from_task(task):
     # Check tags
     if 'tags' in task:
         for tag in task['tags']:
-            if 'xccdf_' in tag and '_rule_' in tag:
-                return shorten_rule_id(tag)
-            # Sometimes tags are already shortened
-            if not tag.startswith('xccdf_'):
-                return tag
+            if isinstance(tag, str):
+                if 'xccdf_' in tag and '_rule_' in tag:
+                    return shorten_rule_id(tag)
+                # Sometimes tags are already shortened
+                if not tag.startswith('xccdf_') and not tag.startswith('CCE-'):
+                    return tag
 
     return None
 
@@ -56,11 +57,15 @@ def filter_playbook(input_file, output_file, rule_ids_to_include):
     Filter an Ansible playbook to only include tasks for specific rule IDs.
     """
     # Read input playbook
-    with open(input_file, 'r') as f:
-        playbook_data = yaml.safe_load(f)
+    try:
+        with open(input_file, 'r') as f:
+            playbook_data = yaml.safe_load(f)
+    except Exception as e:
+        print(f"ERROR: Failed to parse input playbook: {e}", file=sys.stderr)
+        sys.exit(1)
 
     if not isinstance(playbook_data, list) or len(playbook_data) == 0:
-        print("ERROR: Invalid playbook format", file=sys.stderr)
+        print("ERROR: Invalid playbook format - expected a list with at least one play", file=sys.stderr)
         sys.exit(1)
 
     # Get the play (should be a single play)
@@ -142,10 +147,10 @@ def filter_playbook(input_file, output_file, rule_ids_to_include):
 
 def main():
     if len(sys.argv) != 4:
-        print("Usage: filter_remediation_playbook.py <input_playbook.yml> <output_playbook.yml> <comma_separated_rule_ids>", file=sys.stderr)
+        print("Usage: filter_ansible_playbook.py <input_playbook.yml> <output_playbook.yml> <comma_separated_rule_ids>", file=sys.stderr)
         print("", file=sys.stderr)
         print("Example:", file=sys.stderr)
-        print("  filter_remediation_playbook.py full.yml filtered.yml sysctl_crypto_fips_enabled,audit_rules_login_events", file=sys.stderr)
+        print("  filter_ansible_playbook.py full.yml filtered.yml sysctl_crypto_fips_enabled,audit_rules_login_events", file=sys.stderr)
         sys.exit(1)
 
     input_file = sys.argv[1]
