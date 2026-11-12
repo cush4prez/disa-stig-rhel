@@ -115,5 +115,19 @@
       - "  Not applicable: {{ oscap_filtered_results.notapplicable | length }}"
       - "  Not checked: {{ oscap_filtered_results.notchecked | length }}"
       - ""
-      - "{% if oscap_filtered_results.fail | length > 0 %}Failed rules (will be remediated):{% for rule in oscap_filtered_results.fail %}  - {{ rule }}{% endfor %}{% else %}✅ All selected rules passed!{% endif %}"
-      - "{% if oscap_filtered_results.not_found | length > 0 %}⚠️  Rules not found in audit:{% for rule in oscap_filtered_results.not_found %}  - {{ rule }}{% endfor %}{% endif %}"
+      - >-
+        {% if oscap_filtered_results.fail | length > 0 -%}
+        Failed rules (will be remediated):
+        {% for rule in oscap_filtered_results.fail -%}
+          - {{ rule }}
+        {% endfor -%}
+        {% else -%}
+        ✅ All selected rules passed!
+        {% endif %}
+      - >-
+        {% if oscap_filtered_results.not_found | length > 0 -%}
+        ⚠️  Rules not found in audit:
+        {% for rule in oscap_filtered_results.not_found -%}
+          - {{ rule }}
+        {% endfor -%}
+        {% endif %}

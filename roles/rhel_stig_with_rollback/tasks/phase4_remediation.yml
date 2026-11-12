@@ -15,7 +15,6 @@
 
   - name: Display remediation mode
     ansible.builtin.debug:
-      # cspell:ignore STIG stig
       msg:
         - "========================================================================="
         - "{% if rhel_stig_with_rollback_selective_mode %}SELECTIVE STIG REMEDIATION{% else %}FULL STIG REMEDIATION{% endif %}"
@@ -33,7 +32,7 @@
   - name: Generate full STIG remediation script from SCAP data stream
     ansible.builtin.command: >
       oscap xccdf generate fix
-      --fix-type ansible
+      --fix-type bash
       --profile {{ rhel_stig_with_rollback_stig_profile_id }}
       --output "{{ rhel_stig_with_rollback_stig_work_dir }}/remediation_full_{{ rhel_stig_with_rollback_backup_timestamp }}.sh"
       "{{ rhel_stig_with_rollback_scap_ds_path }}"
