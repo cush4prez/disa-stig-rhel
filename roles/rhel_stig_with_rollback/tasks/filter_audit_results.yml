@@ -1,133 +1,81 @@
 ---
-# Filter OSCAP audit results for specific STIG rules using native Ansible modules
-# Replaces: files/filter_audit_results.py
-#
-# Input variables:
-#   - oscap_xml_file: Path to OSCAP XML results
-#   - stig_rules_to_filter: List of rule IDs to filter
-#
-# Output variables:
-#   - oscap_filtered_results: Dictionary with found/not_found/pass/fail/etc.
+# Native Ansible replacement for filter_audit_results.py
+# Parses OpenSCAP XML results and filters by requested rule IDs
 
-- name: Check if audit XML file exists
-  ansible.builtin.stat:
+- name: Extract all rule-result idref attributes from OSCAP XML
+  community.general.xml:
     path: "{{ oscap_xml_file }}"
-  register: oscap_xml_stat
-
-- name: Fail if XML not found
-  ansible.builtin.fail:
-    msg: "OSCAP XML file not found: {{ oscap_xml_file }}"
-  when: not oscap_xml_stat.stat.exists
-
-- name: Initialize result tracking
-  ansible.builtin.set_fact:
-    oscap_filtered_results:
-      found: []
-      not_found: []
-      pass: []
-      fail: []
-      notapplicable: []
-      notchecked: []
-    oscap_rule_results: {}
-
-- name: Read OSCAP XML file
-  ansible.builtin.slurp:
-    src: "{{ oscap_xml_file }}"
-  register: oscap_xml_content
-
-- name: Extract all rule-result elements from XML
-  community.general.xml:
-    xmlstring: "{{ oscap_xml_content.content | b64decode }}"
-    xpath: "//*[local-name()='rule-result']"
+    xpath: //*[local-name()='TestResult']/*[local-name()='rule-result']
     content: attribute
-  register: oscap_rule_results_xml
-  failed_when: false
+  register: xml_rule_attrs
 
-- name: Extract result values for each rule-result
+- name: Extract all rule-result status text nodes from OSCAP XML
   community.general.xml:
-    xmlstring: "{{ oscap_xml_content.content | b64decode }}"
-    xpath: "//*[local-name()='rule-result']/*[local-name()='result']"
+    path: "{{ oscap_xml_file }}"
+    xpath: //*[local-name()='TestResult']/*[local-name()='rule-result']/*[local-name()='result']
     content: text
-  register: oscap_results_values_xml
-  failed_when: false
-
-- name: Build rule results map
-  ansible.builtin.set_fact:
-    oscap_rule_results: >-
-      {{
-        oscap_rule_results | default({}) | combine({
-          item.0.idref.split('_rule_')[1] if '_rule_' in item.0.idref else item.0.idref:
-            item.1.text
-        })
-      }}
-  loop: "{{ oscap_rule_results_xml.matches | default([]) | zip(oscap_results_values_xml.matches | default([])) | list }}"
-  loop_control:
-    label: "{{ item.0.idref.split('_rule_')[1] if '_rule_' in item.0.idref else item.0.idref }}"
-  when:
-    - oscap_rule_results_xml.matches is defined
-    - oscap_results_values_xml.matches is defined
+  register: xml_rule_statuses
 
 - name: Normalize requested rule IDs (strip xccdf prefix)
   ansible.builtin.set_fact:
     normalized_rule_ids: >-
       {{
-        stig_rules_to_filter | map('regex_replace', '^.*_rule_(.*)$', '\1') | list
+        stig_rules_to_filter | default([])
+        | map('regex_replace', '^.*_rule_(.*)$', '\1')
+        | list
       }}
 
-- name: Filter results for requested rules
+- name: Build rule results map safely
+  ansible.builtin.set_fact:
+    _rule_results_map: >-
+      {%- set result_map = {} -%}
+      {%- set attrs = xml_rule_attrs.matches | default([]) -%}
+      {%- set statuses = xml_rule_statuses.matches | default([]) -%}
+      {%- for idx in range(attrs | length) -%}
+        {%- set node_dict = attrs[idx].values() | list | first | default({}) -%}
+        {%- set full_id = node_dict.get('idref', '') -%}
+        {%- set short_id = full_id | regex_replace('^.*_rule_(.*)$', '\1') -%}
+        {%- set status_dict = statuses[idx] if idx < (statuses | length) else {} -%}
+        {%- set status_val = (status_dict.values() | list | first | default('notchecked')) | string | trim | lower -%}
+        {%- if short_id != '' -%}
+          {%- set _ = result_map.update({short_id: {'full_id': full_id, 'result': status_val}}) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ result_map }}
+
+- name: Categorize filtered rules into pass, fail, notapplicable, notchecked, and not_found
   ansible.builtin.set_fact:
     oscap_filtered_results: >-
+      {%- set found = [] -%}
+      {%- set not_found = [] -%}
+      {%- set passed = [] -%}
+      {%- set failed = [] -%}
+      {%- set notapplicable = [] -%}
+      {%- set notchecked = [] -%}
+      {%- for req_id in normalized_rule_ids -%}
+        {%- if req_id in _rule_results_map -%}
+          {%- set entry = _rule_results_map[req_id] -%}
+          {%- set _ = found.append(entry.full_id) -%}
+          {%- if entry.result == 'pass' -%}
+            {%- set _ = passed.append(entry.full_id) -%}
+          {%- elif entry.result in ['fail', 'error'] -%}
+            {%- set _ = failed.append(entry.full_id) -%}
+          {%- elif entry.result in ['notapplicable', 'notselected'] -%}
+            {%- set _ = notapplicable.append(entry.full_id) -%}
+          {%- else -%}
+            {%- set _ = notchecked.append(entry.full_id) -%}
+          {%- endif -%}
+        {%- else -%}
+          {%- set _ = not_found.append(req_id) -%}
+        {%- endif -%}
+      {%- endfor -%}
       {{
-        oscap_filtered_results | combine({
-          'found': oscap_filtered_results.found + [item],
-          (oscap_rule_results[item]): oscap_filtered_results[oscap_rule_results[item]] + [item]
-        })
+        {
+          'found': found,
+          'not_found': not_found,
+          'pass': passed,
+          'fail': failed,
+          'notapplicable': notapplicable,
+          'notchecked': notchecked
+        }
       }}
-  loop: "{{ normalized_rule_ids }}"
-  when: item in oscap_rule_results.keys()
-  loop_control:
-    label: "{{ item }}: {{ oscap_rule_results[item] | default('not found') }}"
-
-- name: Identify rules not found in audit
-  ansible.builtin.set_fact:
-    oscap_filtered_results: >-
-      {{
-        oscap_filtered_results | combine({
-          'not_found': oscap_filtered_results.not_found + [item]
-        })
-      }}
-  loop: "{{ normalized_rule_ids }}"
-  when: item not in oscap_rule_results.keys()
-  loop_control:
-    label: "{{ item }}"
-
-- name: Display filtered audit results
-  ansible.builtin.debug:
-    msg:
-      - "Filtered Audit Results:"
-      - "  Selected rules: {{ stig_rules_to_filter | length }}"
-      - "  Found: {{ oscap_filtered_results.found | length }}"
-      - "  Not found: {{ oscap_filtered_results.not_found | length }}"
-      - ""
-      - "Results breakdown:"
-      - "  Pass: {{ oscap_filtered_results.pass | length }}"
-      - "  Fail: {{ oscap_filtered_results.fail | length }}"
-      - "  Not applicable: {{ oscap_filtered_results.notapplicable | length }}"
-      - "  Not checked: {{ oscap_filtered_results.notchecked | length }}"
-      - ""
-      - >-
-        {% if oscap_filtered_results.fail | length > 0 -%}
-        Failed rules (will be remediated):
-        {% for rule in oscap_filtered_results.fail -%}
-          - {{ rule }}
-        {% endfor -%}
-        {% else -%}
-        ✅ All selected rules passed!
-        {% endif %}
-      - >-
-        {% if oscap_filtered_results.not_found | length > 0 -%}
-        ⚠️  Rules not found in audit:
-        {% for rule in oscap_filtered_results.not_found -%}
-          - {{ rule }}
-        {% endfor -%}
-        {% endif %}
