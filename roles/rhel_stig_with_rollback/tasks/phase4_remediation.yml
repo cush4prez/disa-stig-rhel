@@ -1,5 +1,5 @@
 ---
-# Phase 4: Generate and apply remediations using native Ansible playbooks (no Python scripts)
+# Phase 4: Generate and apply remediations using pure Ansible playbooks (no .sh or .py scripts)
 
 - name: Apply security hardening
   when: rhel_stig_with_rollback_apply_remediations
@@ -17,7 +17,7 @@
       ansible.builtin.debug:
         msg:
           - "========================================================================="
-          - "{% if rhel_stig_with_rollback_selective_mode %}SELECTIVE REMEDIATION (NATIVE ANSIBLE){% else %}FULL REMEDIATION (NATIVE ANSIBLE){% endif %}"
+          - "{% if rhel_stig_with_rollback_selective_mode %}SELECTIVE REMEDIATION (ANSIBLE PLAYBOOK){% else %}FULL REMEDIATION (ANSIBLE PLAYBOOK){% endif %}"
           - "========================================================================="
           - >-
             {{ 'Applying ' ~ (rhel_stig_with_rollback_stig_rules_to_apply | length) ~ ' selected rules'
@@ -46,6 +46,18 @@
         not rhel_stig_with_rollback_remediation_playbook_stat.stat.exists or
         rhel_stig_with_rollback_remediation_playbook_stat.stat.size | default(0) < 100
 
+    - name: Ensure valid hosts target in generated remediation playbook
+      ansible.builtin.replace:
+        path: "{{ rhel_stig_with_rollback_stig_work_dir }}/remediation_{{ rhel_stig_with_rollback_backup_timestamp }}.yml"
+        regexp: 'hosts:\s*@@HOSTS@@'
+        replace: 'hosts: all'
+
+    - name: Fetch generated remediation playbook to controller
+      ansible.builtin.fetch:
+        src: "{{ rhel_stig_with_rollback_stig_work_dir }}/remediation_{{ rhel_stig_with_rollback_backup_timestamp }}.yml"
+        dest: "/tmp/remediation_{{ inventory_hostname }}_{{ rhel_stig_with_rollback_backup_timestamp }}.yml"
+        flat: true
+
     - name: Build normalized tag list for selective mode
       ansible.builtin.set_fact:
         rhel_stig_with_rollback_ansible_tags: >-
@@ -57,40 +69,47 @@
           {{ tag_list | join(',') }}
       when: rhel_stig_with_rollback_selective_mode
 
-    - name: Execute generated Ansible remediation playbook (Full Mode)
+    - name: Execute generated Ansible remediation playbook from controller (Full Mode)
       ansible.builtin.command: >
-        ansible-playbook -i localhost, -c local
-        "{{ rhel_stig_with_rollback_stig_work_dir }}/remediation_{{ rhel_stig_with_rollback_backup_timestamp }}.yml"
-      args:
-        chdir: "{{ rhel_stig_with_rollback_stig_work_dir }}"
+        ansible-playbook
+        -i "{{ ansible_host | default(inventory_hostname) }},"
+        -u "{{ ansible_user }}"
+        --become
+        "/tmp/remediation_{{ inventory_hostname }}_{{ rhel_stig_with_rollback_backup_timestamp }}.yml"
+      delegate_to: localhost
+      become: false
       register: rhel_stig_with_rollback_remediation_result
       failed_when: false
       changed_when: true
       async: 3600
       poll: 10
-      environment:
-        PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-      ignore_unreachable: true
       when: not rhel_stig_with_rollback_selective_mode
 
-    - name: Execute generated Ansible remediation playbook (Selective Mode via Tags)
+    - name: Execute generated Ansible remediation playbook from controller (Selective Mode via Tags)
       ansible.builtin.command: >
-        ansible-playbook -i localhost, -c local
+        ansible-playbook
+        -i "{{ ansible_host | default(inventory_hostname) }},"
+        -u "{{ ansible_user }}"
+        --become
         --tags "{{ rhel_stig_with_rollback_ansible_tags }}"
-        "{{ rhel_stig_with_rollback_stig_work_dir }}/remediation_{{ rhel_stig_with_rollback_backup_timestamp }}.yml"
-      args:
-        chdir: "{{ rhel_stig_with_rollback_stig_work_dir }}"
+        "/tmp/remediation_{{ inventory_hostname }}_{{ rhel_stig_with_rollback_backup_timestamp }}.yml"
+      delegate_to: localhost
+      become: false
       register: rhel_stig_with_rollback_remediation_result
       failed_when: false
       changed_when: true
       async: 3600
       poll: 10
-      environment:
-        PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-      ignore_unreachable: true
       when:
         - rhel_stig_with_rollback_selective_mode
         - rhel_stig_with_rollback_ansible_tags | length > 0
+
+    - name: Remove temporary remediation playbook from controller
+      ansible.builtin.file:
+        path: "/tmp/remediation_{{ inventory_hostname }}_{{ rhel_stig_with_rollback_backup_timestamp }}.yml"
+        state: absent
+      delegate_to: localhost
+      become: false
 
     - name: Check if system is still reachable after remediation
       ansible.builtin.wait_for_connection:
@@ -130,9 +149,7 @@
       ansible.builtin.copy:
         dest: "{{ rhel_stig_with_rollback_stig_work_dir }}/remediation_{{ rhel_stig_with_rollback_backup_timestamp }}.log"
         content: |
-          MODE: {% if rhel_stig_with_rollback_selective_mode %}
-          SELECTIVE (Tags: {{ rhel_stig_with_rollback_ansible_tags | default('') }})
-          {% else %}FULL{% endif %}
+          MODE: {% if rhel_stig_with_rollback_selective_mode %}SELECTIVE (Tags: {{ rhel_stig_with_rollback_ansible_tags | default('') }}){% else %}FULL{% endif %}
 
           EXIT CODE: {{ rhel_stig_with_rollback_remediation_result.rc | default(0) }}
 
