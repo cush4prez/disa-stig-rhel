@@ -30,11 +30,12 @@ def main() -> int:
     with open(input_path, "r", encoding="utf-8", errors="replace") as infile:
         lines = infile.readlines()
 
-    # Matches both:
+    # Matches quoted, unquoted, and numbered OpenSCAP bash headers:
     #   # BEGIN fix for 'xccdf_org.ssgproject.content_rule_banner_etc_issue'
     #   # BEGIN fix (1 / 342) for 'xccdf_org.ssgproject.content_rule_banner_etc_issue'
-    begin_pattern = re.compile(r"^#\s*BEGIN fix(?:\s*\(\d+\s*/\s*\d+\))?\s+for\s+'([^']+)'")
-    end_pattern = re.compile(r"^#\s*END fix(?:\s*\(\d+\s*/\s*\d+\))?\s+for\s+'([^']+)'")
+    #   # BEGIN fix (1 / 342) for xccdf_org.ssgproject.content_rule_banner_etc_issue
+    begin_pattern = re.compile(r"^#\s*BEGIN fix(?:\s*\(\d+\s*/\s*\d+\))?\s+for\s+['\"]?([^\s'\"]+)['\"]?")
+    end_pattern = re.compile(r"^#\s*END fix(?:\s*\(\d+\s*/\s*\d+\))?\s+for\s+['\"]?([^\s'\"]+)['\"]?")
 
     header_lines = []
     matched_blocks = []

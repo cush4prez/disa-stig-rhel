@@ -78,6 +78,7 @@
 
         - name: Create filtered remediation script
           ansible.builtin.command: >
+            {{ ansible_python_interpreter | default('/usr/libexec/platform-python') }}
             {{ rhel_stig_with_rollback_stig_work_dir }}/filter_remediation_script.py
             {{ rhel_stig_with_rollback_stig_work_dir }}/remediation_full_{{ rhel_stig_with_rollback_backup_timestamp }}.sh
             {{ rhel_stig_with_rollback_stig_work_dir }}/remediation_{{ rhel_stig_with_rollback_backup_timestamp }}.sh
