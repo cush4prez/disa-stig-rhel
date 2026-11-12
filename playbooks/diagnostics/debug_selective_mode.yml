@@ -1,0 +1,91 @@
+---
+# Diagnostic playbook to debug selective mode variable processing
+- name: Debug Selective Mode Variables
+  hosts: all
+  gather_facts: true
+  become: true
+
+  pre_tasks:
+    - name: Show raw input variables
+      ansible.builtin.debug:
+        msg:
+          - "=== RAW INPUT VARIABLES ==="
+          - "stig_audit_mode: {{ stig_audit_mode | default('NOT DEFINED') }}"
+          - "stig_rules_input: {{ stig_rules_input | default('NOT DEFINED') }}"
+          - "rhel_stig_with_rollback_stig_audit_mode: {{ rhel_stig_with_rollback_stig_audit_mode | default('NOT DEFINED') }}"
+          - "rhel_stig_with_rollback_stig_rules_to_apply (from defaults): {{ rhel_stig_with_rollback_stig_rules_to_apply | default('NOT DEFINED') }}"
+
+    # Mimic the site.yml pre_task processing
+    - name: Convert survey inputs to role variables (AAP 2.7)
+      ansible.builtin.set_fact:
+        rhel_stig_with_rollback_stig_rules_to_apply: >-
+          {% if stig_audit_mode is defined and (stig_audit_mode == 'selective') %}
+          {{ stig_rules_input.split(',') | map('trim') | select | list }}
+          {% else %}
+          []
+          {% endif %}
+      when: stig_audit_mode is defined
+
+    - name: Show after site.yml processing
+      ansible.builtin.debug:
+        msg:
+          - "=== AFTER SITE.YML PRE_TASK ==="
+          - "rhel_stig_with_rollback_stig_rules_to_apply: {{ rhel_stig_with_rollback_stig_rules_to_apply | default('NOT DEFINED') }}"
+          - "Type: {{ rhel_stig_with_rollback_stig_rules_to_apply | type_debug }}"
+          - "Length: {{ rhel_stig_with_rollback_stig_rules_to_apply | default([]) | length }}"
+
+    # Now test the role's processing logic
+    - name: Normalize audit mode and selected rules list
+      ansible.builtin.set_fact:
+        _normalized_rules_list: >-
+          {%- set raw = rhel_stig_with_rollback_stig_rules_to_apply | default([]) -%}
+          {%- if raw is string -%}
+            {{ raw.replace('\n', ',').split(',') | map('trim') | reject('equalto', '') | list }}
+          {%- elif raw is iterable -%}
+            {{ raw | map('trim') | reject('equalto', '') | list }}
+          {%- else -%}
+            []
+          {%- endif -%}
+
+    - name: Determine effective audit mode
+      ansible.builtin.set_fact:
+        _effective_audit_mode: >-
+          {%- set explicit_mode = stig_audit_mode | default(rhel_stig_with_rollback_stig_audit_mode | default('')) | string | trim | lower -%}
+          {%- if explicit_mode in ['selective', 'full'] -%}
+            {{ explicit_mode }}
+          {%- elif _normalized_rules_list | length > 0 -%}
+            selective
+          {%- else -%}
+            full
+          {%- endif -%}
+
+    - name: Check if selective audit is requested
+      ansible.builtin.set_fact:
+        rhel_stig_with_rollback_selective_mode: >-
+          {{
+            (_effective_audit_mode == 'selective') and
+            (_normalized_rules_list | length > 0)
+          }}
+        rhel_stig_with_rollback_stig_rules_to_apply: "{{ _normalized_rules_list }}"
+
+    - name: Show final computed values
+      ansible.builtin.debug:
+        msg:
+          - "=== FINAL COMPUTED VALUES ==="
+          - "_normalized_rules_list: {{ _normalized_rules_list }}"
+          - "_effective_audit_mode: {{ _effective_audit_mode }}"
+          - "rhel_stig_with_rollback_selective_mode: {{ rhel_stig_with_rollback_selective_mode }}"
+          - "rhel_stig_with_rollback_stig_rules_to_apply: {{ rhel_stig_with_rollback_stig_rules_to_apply }}"
+          - "---"
+          - "{% if rhel_stig_with_rollback_selective_mode %}SELECTIVE MODE ENABLED{% else %}FULL MODE (selective not enabled){% endif %}"
+          - "{% if rhel_stig_with_rollback_selective_mode %}Rules: {{ rhel_stig_with_rollback_stig_rules_to_apply | join(', ') }}{% endif %}"
+
+  tasks:
+    - name: Summary
+      ansible.builtin.debug:
+        msg:
+          - "========================================"
+          - "DIAGNOSIS COMPLETE"
+          - "========================================"
+          - "Mode: {% if rhel_stig_with_rollback_selective_mode %}SELECTIVE{% else %}FULL{% endif %}"
+          - "Rules count: {{ rhel_stig_with_rollback_stig_rules_to_apply | length }}"
