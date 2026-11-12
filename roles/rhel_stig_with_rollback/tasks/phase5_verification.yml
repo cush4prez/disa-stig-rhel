@@ -73,13 +73,6 @@
   register: rhel_stig_with_rollback_post_xml_stat
   when: rhel_stig_with_rollback_apply_remediations
 
-- name: Copy parse script to work directory
-  ansible.builtin.copy:
-    src: parse_oscap_score.py
-    dest: "{{ rhel_stig_with_rollback_stig_work_dir }}/parse_oscap_score.py"
-    mode: '0755'
-  when: rhel_stig_with_rollback_apply_remediations and rhel_stig_with_rollback_post_xml_stat.stat.exists
-
 - name: Parse post-hardening audit results (native)
   when:
     - rhel_stig_with_rollback_apply_remediations | default(true)

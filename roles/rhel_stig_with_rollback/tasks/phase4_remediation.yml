@@ -1,216 +1,267 @@
 ---
-# Phase 4: Generate and apply STIG remediations (selective or full)
+# Phase 4: Generate and apply STIG remediations (100% Native Ansible - Zero .py or .sh scripts)
 
 - name: Apply STIG hardening
   when: rhel_stig_with_rollback_apply_remediations
   block:
-  - name: Check if selective audit is requested
-    ansible.builtin.set_fact:
-      rhel_stig_with_rollback_selective_mode: >-
-        {{
-          (stig_audit_mode | default('full') | lower == 'selective') and
-          (rhel_stig_with_rollback_stig_rules_to_apply is defined) and
-          (rhel_stig_with_rollback_stig_rules_to_apply | string | trim not in ['', '[]', 'none', 'null'])
-        }}
+    - name: Normalize audit mode and selected rules list
+      ansible.builtin.set_fact:
+        _normalized_rules_list: >-
+          {%- set raw = rhel_stig_with_rollback_stig_rules_to_apply | default([]) -%}
+          {%- if raw is string -%}
+            {{ raw.replace('\n', ',').split(',') | map('trim') | reject('equalto', '') | list }}
+          {%- elif raw is iterable -%}
+            {{ raw | map('trim') | reject('equalto', '') | list }}
+          {%- else -%}
+            []
+          {%- endif -%}
 
-  - name: Display remediation mode
-    ansible.builtin.debug:
-      msg:
-        - "========================================================================="
-        - "{% if rhel_stig_with_rollback_selective_mode %}SELECTIVE STIG REMEDIATION{% else %}FULL STIG REMEDIATION{% endif %}"
-        - "========================================================================="
-        - >-
-          {{ 'Applying ' ~ (rhel_stig_with_rollback_stig_rules_to_apply | length) ~ ' selected rules'
-              if rhel_stig_with_rollback_selective_mode else 'Applying all STIG rules from profile' }}
-        - >-
-          {% if rhel_stig_with_rollback_selective_mode -%}
-          Selected rules:{% for rule in
-          rhel_stig_with_rollback_stig_rules_to_apply %}  - {{ rule }}{% endfor %}
-          {%- endif %}
-        - "========================================================================="
+    - name: Determine effective audit mode
+      ansible.builtin.set_fact:
+        _effective_audit_mode: >-
+          {%- set explicit_mode = stig_audit_mode | default(rhel_stig_with_rollback_stig_audit_mode | default('')) | string | trim | lower -%}
+          {%- if explicit_mode in ['selective', 'full'] -%}
+            {{ explicit_mode }}
+          {%- elif _normalized_rules_list | length > 0 -%}
+            selective
+          {%- else -%}
+            full
+          {%- endif -%}
 
-  - name: Generate full STIG remediation script from SCAP data stream
-    ansible.builtin.command: >
-      oscap xccdf generate fix
-      --fix-type bash
-      --profile {{ rhel_stig_with_rollback_stig_profile_id }}
-      --output "{{ rhel_stig_with_rollback_stig_work_dir }}/remediation_full_{{ rhel_stig_with_rollback_backup_timestamp }}.sh"
-      "{{ rhel_stig_with_rollback_scap_ds_path }}"
-    register: rhel_stig_with_rollback_generate_fix
-    changed_when: true
+    - name: Check if selective audit is requested
+      ansible.builtin.set_fact:
+        rhel_stig_with_rollback_selective_mode: >-
+          {{
+            (_effective_audit_mode == 'selective') and
+            (_normalized_rules_list | length > 0)
+          }}
+        rhel_stig_with_rollback_stig_rules_to_apply: "{{ _normalized_rules_list }}"
 
-  - name: Check full remediation script was created
-    ansible.builtin.stat:
-      path: "{{ rhel_stig_with_rollback_stig_work_dir }}/remediation_full_{{ rhel_stig_with_rollback_backup_timestamp }}.sh"
-    register: rhel_stig_with_rollback_full_script_stat
+    - name: Display remediation mode
+      ansible.builtin.debug:
+        msg:
+          - "========================================================================="
+          - "{% if rhel_stig_with_rollback_selective_mode %}SELECTIVE STIG REMEDIATION{% else %}FULL STIG REMEDIATION{% endif %}"
+          - "========================================================================="
+          - >-
+            {{ 'Applying ' ~ (rhel_stig_with_rollback_stig_rules_to_apply | length) ~ ' selected rules'
+                if rhel_stig_with_rollback_selective_mode else 'Applying all STIG rules from profile' }}
+          - >-
+            {% if rhel_stig_with_rollback_selective_mode -%}
+            Selected rules:{% for rule in rhel_stig_with_rollback_stig_rules_to_apply %}  - {{ rule }}{% endfor %}
+            {%- endif %}
+          - "========================================================================="
 
-  - name: Fail if full remediation script is empty or missing
-    ansible.builtin.fail:
-      msg: "Full remediation script was not generated or is empty"
-    when: not rhel_stig_with_rollback_full_script_stat.stat.exists or rhel_stig_with_rollback_full_script_stat.stat.size | default(0) < 100
+    - name: Generate full STIG remediation playbook from SCAP data stream
+      ansible.builtin.command: >
+        oscap xccdf generate fix
+        --fix-type ansible
+        --profile {{ rhel_stig_with_rollback_stig_profile_id }}
+        --output "{{ rhel_stig_with_rollback_stig_work_dir }}/remediation_full_{{ rhel_stig_with_rollback_backup_timestamp }}.yml"
+        "{{ rhel_stig_with_rollback_scap_ds_path }}"
+      register: rhel_stig_with_rollback_generate_fix
+      changed_when: true
 
-  - name: Filter remediation script for selected rules (selective mode)
-    when: rhel_stig_with_rollback_selective_mode
-    block:
-      - name: Copy filter script
-        ansible.builtin.copy:
-          src: filter_remediation_script.py
-          dest: "{{ rhel_stig_with_rollback_stig_work_dir }}/filter_remediation_script.py"
-          mode: '0755'
+    - name: Check full remediation playbook was created
+      ansible.builtin.stat:
+        path: "{{ rhel_stig_with_rollback_stig_work_dir }}/remediation_full_{{ rhel_stig_with_rollback_backup_timestamp }}.yml"
+      register: rhel_stig_with_rollback_full_playbook_stat
 
-      - name: Create filtered remediation script
-        ansible.builtin.command: >
-          {{ rhel_stig_with_rollback_stig_work_dir }}/filter_remediation_script.py
-          {{ rhel_stig_with_rollback_stig_work_dir }}/remediation_full_{{ rhel_stig_with_rollback_backup_timestamp }}.sh
-          {{ rhel_stig_with_rollback_stig_work_dir }}/remediation_{{ rhel_stig_with_rollback_backup_timestamp }}.sh
-          {{ rhel_stig_with_rollback_stig_rules_to_apply | join(',') }}
-        register: rhel_stig_with_rollback_filter_result
-        changed_when: true
+    - name: Fail if full remediation playbook is empty or missing
+      ansible.builtin.fail:
+        msg: "Full remediation playbook was not generated or is empty"
+      when: >
+        not rhel_stig_with_rollback_full_playbook_stat.stat.exists or
+        rhel_stig_with_rollback_full_playbook_stat.stat.size | default(0) < 100
 
-      - name: Display filter results
-        ansible.builtin.debug:
-          msg: "{{ rhel_stig_with_rollback_filter_result.stdout_lines }}"
+    - name: Fetch generated remediation playbook to controller
+      ansible.builtin.fetch:
+        src: "{{ rhel_stig_with_rollback_stig_work_dir }}/remediation_full_{{ rhel_stig_with_rollback_backup_timestamp }}.yml"
+        dest: "/tmp/remediation_full_{{ inventory_hostname }}_{{ rhel_stig_with_rollback_backup_timestamp }}.yml"
+        flat: true
 
-  - name: Use full remediation script (non-selective mode)
-    ansible.builtin.copy:
-      src: "{{ rhel_stig_with_rollback_stig_work_dir }}/remediation_full_{{ rhel_stig_with_rollback_backup_timestamp }}.sh"
-      dest: "{{ rhel_stig_with_rollback_stig_work_dir }}/remediation_{{ rhel_stig_with_rollback_backup_timestamp }}.sh"
-      mode: '0700'
-      remote_src: true
-    when: not rhel_stig_with_rollback_selective_mode
+    - name: Read generated remediation playbook on controller
+      ansible.builtin.slurp:
+        src: "/tmp/remediation_full_{{ inventory_hostname }}_{{ rhel_stig_with_rollback_backup_timestamp }}.yml"
+      delegate_to: localhost
+      become: false
+      register: _raw_oscap_playbook_b64
 
-  - name: Check final remediation script was created
-    ansible.builtin.stat:
-      path: "{{ rhel_stig_with_rollback_stig_work_dir }}/remediation_{{ rhel_stig_with_rollback_backup_timestamp }}.sh"
-    register: rhel_stig_with_rollback_remediation_script_stat
+    - name: Parse and filter OSCAP tasks natively in Ansible
+      ansible.builtin.set_fact:
+        _parsed_oscap_play: "{{ (_raw_oscap_playbook_b64.content | b64decode | from_yaml)[0] }}"
+        _normalized_requested_rules: >-
+          {{
+            rhel_stig_with_rollback_stig_rules_to_apply
+            | map('regex_replace', '^.*_rule_', '')
+            | list
+          }}
 
-  - name: Display remediation script info
-    ansible.builtin.debug:
-      msg:
-        - "Remediation script: {{ rhel_stig_with_rollback_stig_work_dir }}/remediation_{{ rhel_stig_with_rollback_backup_timestamp }}.sh"
-        - "Script exists: {{ rhel_stig_with_rollback_remediation_script_stat.stat.exists }}"
-        - "Script size: {{ rhel_stig_with_rollback_remediation_script_stat.stat.size | default(0) }} bytes"
-        - >-
-          {% if rhel_stig_with_rollback_selective_mode %}Mode: SELECTIVE
-          ({{ rhel_stig_with_rollback_stig_rules_to_apply | length }} rules){% else %}Mode: FULL (all rules){% endif %}
+    - name: Extract matching remediation tasks and play variables
+      ansible.builtin.set_fact:
+        _extracted_remediation_tasks: >-
+          {%- set play_vars = _parsed_oscap_play.vars | default({}) -%}
+          {%- set all_tasks = _parsed_oscap_play.tasks | default([]) -%}
+          {%- set out_tasks = [] -%}
+          {%- if play_vars | length > 0 -%}
+            {%- set _ = out_tasks.append({'name': 'Load OSCAP playbook variables', 'ansible.builtin.set_fact': play_vars}) -%}
+          {%- endif -%}
+          {%- if not rhel_stig_with_rollback_selective_mode -%}
+            {%- set _ = out_tasks.extend(all_tasks) -%}
+          {%- else -%}
+            {%- for task in all_tasks -%}
+              {%- set ns = namespace(matched=false) -%}
+              {%- set tname = task.name | default('') -%}
+              {%- if '_rule_' in tname -%}
+                {%- set short_from_name = tname | regex_replace('^.*_rule_([^\\s\'\"]+).*$', '\\1') -%}
+                {%- if short_from_name in _normalized_requested_rules -%}
+                  {%- set ns.matched = true -%}
+                {%- endif -%}
+              {%- endif -%}
+              {%- for tag in task.tags | default([]) -%}
+                {%- if tag is string -%}
+                  {%- set short_tag = tag | regex_replace('^.*_rule_', '') -%}
+                  {%- if short_tag in _normalized_requested_rules -%}
+                    {%- set ns.matched = true -%}
+                  {%- endif -%}
+                {%- endif -%}
+              {%- endfor -%}
+              {%- if ns.matched -%}
+                {%- set _ = out_tasks.append(task) -%}
+              {%- endif -%}
+            {%- endfor -%}
+          {%- endif -%}
+          {{ out_tasks }}
 
-  - name: Fail if remediation script is empty or missing
-    ansible.builtin.fail:
-      msg: "Remediation script was not generated or is empty"
-    when: not rhel_stig_with_rollback_remediation_script_stat.stat.exists or rhel_stig_with_rollback_remediation_script_stat.stat.size | default(0) < 100
+    - name: Fail if no matching tasks were extracted in selective mode
+      ansible.builtin.fail:
+        msg: "0 tasks matched requested rules: {{ _normalized_requested_rules | join(', ') }}"
+      when: >
+        rhel_stig_with_rollback_selective_mode and
+        (_extracted_remediation_tasks | length <= (1 if (_parsed_oscap_play.vars | default({}) | length > 0) else 0))
 
-  - name: Set remediation script permissions
-    ansible.builtin.file:
-      path: "{{ rhel_stig_with_rollback_stig_work_dir }}/remediation_{{ rhel_stig_with_rollback_backup_timestamp }}.sh"
-      mode: '0700'
+    - name: Write executable task list on controller
+      ansible.builtin.copy:
+        dest: "/tmp/remediation_tasks_{{ inventory_hostname }}_{{ rhel_stig_with_rollback_backup_timestamp }}.yml"
+        content: "{{ _extracted_remediation_tasks | to_nice_yaml(indent=2) }}"
+        mode: '0644'
+      delegate_to: localhost
+      become: false
 
-  - name: Execute remediation script from work directory
-    ansible.builtin.command: "{{ rhel_stig_with_rollback_stig_work_dir }}/remediation_{{ rhel_stig_with_rollback_backup_timestamp }}.sh"
-    args:
-      chdir: "{{ rhel_stig_with_rollback_stig_work_dir }}"
-      executable: /bin/bash
-    register: rhel_stig_with_rollback_remediation_result
-    failed_when: false
-    changed_when: true
-    async: 3600
-    poll: 10
-    environment:
-      PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-    ignore_unreachable: true
+    - name: Copy prepared task list to target work directory for audit trail
+      ansible.builtin.copy:
+        src: "/tmp/remediation_tasks_{{ inventory_hostname }}_{{ rhel_stig_with_rollback_backup_timestamp }}.yml"
+        dest: "{{ rhel_stig_with_rollback_stig_work_dir }}/remediation_{{ rhel_stig_with_rollback_backup_timestamp }}.yml"
+        mode: '0644'
 
-  - name: Check if system is still reachable after remediation
-    ansible.builtin.wait_for_connection:
-      delay: 5
-      timeout: 300
-    register: rhel_stig_with_rollback_reconnect_result
-    failed_when: false
+    - name: Execute remediation tasks natively
+      block:
+        - name: Include remediation tasks
+          ansible.builtin.include_tasks: "/tmp/remediation_tasks_{{ inventory_hostname }}_{{ rhel_stig_with_rollback_backup_timestamp }}.yml"
+      rescue:
+        - name: Capture remediation errors
+          ansible.builtin.set_fact:
+            rhel_stig_with_rollback_remediation_result:
+              failed: true
+              msg: "{{ ansible_failed_result.msg | default('Remediation tasks encountered errors') }}"
+      always:
+        - name: Set remediation success if no errors
+          ansible.builtin.set_fact:
+            rhel_stig_with_rollback_remediation_result:
+              failed: false
+          when: rhel_stig_with_rollback_remediation_result is not defined
 
-  - name: Handle potential reboot from remediation
-    when: rhel_stig_with_rollback_reconnect_result is failed
-    block:
-      - name: Wait for system to come back (may have rebooted)
-        ansible.builtin.wait_for:
-          host: "{{ ansible_host | default(inventory_hostname) }}"
-          port: 22
-          delay: 10
-          timeout: 600
-          state: started
-        delegate_to: localhost
-        become: false
+        - name: Clean up temporary controller remediation files
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - "/tmp/remediation_full_{{ inventory_hostname }}_{{ rhel_stig_with_rollback_backup_timestamp }}.yml"
+            - "/tmp/remediation_tasks_{{ inventory_hostname }}_{{ rhel_stig_with_rollback_backup_timestamp }}.yml"
+          delegate_to: localhost
+          become: false
 
-      - name: Wait for system to be fully ready
-        ansible.builtin.wait_for_connection:
-          delay: 15
-          timeout: 300
+    - name: Check if system is still reachable after remediation
+      ansible.builtin.wait_for_connection:
+        delay: 5
+        timeout: 300
+      register: rhel_stig_with_rollback_reconnect_result
+      failed_when: false
 
-      - name: Gather facts after reboot
-        ansible.builtin.setup:
+    - name: Handle potential reboot from remediation
+      when: rhel_stig_with_rollback_reconnect_result is failed
+      block:
+        - name: Wait for system to come back (may have rebooted)
+          ansible.builtin.wait_for:
+            host: "{{ ansible_host | default(inventory_hostname) }}"
+            port: 22
+            delay: 10
+            timeout: 600
+            state: started
+          delegate_to: localhost
+          become: false
 
-  - name: Re-register remediation result if connection lost
-    ansible.builtin.set_fact:
-      rhel_stig_with_rollback_remediation_result: >-
-        {{ rhel_stig_with_rollback_remediation_result | default({'rc': 0, 'stdout': 'Completed - system may have rebooted', 'stderr': ''}) }}
-    when: rhel_stig_with_rollback_remediation_result is not defined
+        - name: Wait for system to be fully ready
+          ansible.builtin.wait_for_connection:
+            delay: 15
+            timeout: 300
 
-  - name: Save remediation log
-    ansible.builtin.copy:
-      dest: "{{ rhel_stig_with_rollback_stig_work_dir }}/remediation_{{ rhel_stig_with_rollback_backup_timestamp }}.log"
-      content: |
-        MODE: {% if rhel_stig_with_rollback_selective_mode %}SELECTIVE{% else %}FULL{% endif %}
+        - name: Gather facts after reboot
+          ansible.builtin.setup:
 
-        {% if rhel_stig_with_rollback_selective_mode %}
-        SELECTED RULES ({{ rhel_stig_with_rollback_stig_rules_to_apply | length }}):
-        {% for rule in rhel_stig_with_rollback_stig_rules_to_apply %}
-          - {{ rule }}
-        {% endfor %}
-        {% endif %}
+    - name: Save remediation log
+      ansible.builtin.copy:
+        dest: "{{ rhel_stig_with_rollback_stig_work_dir }}/remediation_{{ rhel_stig_with_rollback_backup_timestamp }}.log"
+        content: |
+          MODE: {% if rhel_stig_with_rollback_selective_mode %}SELECTIVE{% else %}FULL{% endif %}
 
-        EXIT CODE: {{ rhel_stig_with_rollback_remediation_result.rc }}
+          {% if rhel_stig_with_rollback_selective_mode %}
+          SELECTED RULES ({{ rhel_stig_with_rollback_stig_rules_to_apply | length }}):
+          {% for rule in rhel_stig_with_rollback_stig_rules_to_apply %}
+            - {{ rule }}
+          {% endfor %}
+          {% endif %}
 
-        STDOUT:
-        {{ rhel_stig_with_rollback_remediation_result.stdout }}
+          REMEDIATION TYPE: 100% Native Ansible (Zero .py/.sh scripts)
+          EXTRACTED ITEMS: {{ _extracted_remediation_tasks | length }}
+          STATUS: {% if rhel_stig_with_rollback_remediation_result.failed | default(false) %}FAILED{% else %}COMPLETED{% endif %}
 
-        STDERR:
-        {{ rhel_stig_with_rollback_remediation_result.stderr }}
-      mode: '0644'
+          {% if rhel_stig_with_rollback_remediation_result.failed | default(false) %}
+          ERROR: {{ rhel_stig_with_rollback_remediation_result.msg | default('Unknown error') }}
+          {% endif %}
+        mode: '0644'
 
-  - name: Check remediation exit code
-    ansible.builtin.set_fact:
-      rhel_stig_with_rollback_remediation_failed: "{{ rhel_stig_with_rollback_remediation_result.rc not in [0, 2] }}"
+    - name: Check remediation status
+      ansible.builtin.set_fact:
+        rhel_stig_with_rollback_remediation_failed: "{{ rhel_stig_with_rollback_remediation_result.failed | default(false) }}"
 
-  - name: Note remediation issues (not necessarily critical)
-    ansible.builtin.debug:
-      msg:
-        - "⚠️  Remediation script exited with code {{ rhel_stig_with_rollback_remediation_result.rc }}"
-        - "This indicates some STIG rules could not be applied."
-        - "This is NORMAL and does NOT mean the system is broken."
-        - "Checking if system is still operational..."
-    when: rhel_stig_with_rollback_remediation_failed | default(false)
+    - name: Note remediation issues (not necessarily critical)
+      ansible.builtin.debug:
+        msg:
+          - "⚠️  Remediation tasks encountered errors: {{ rhel_stig_with_rollback_remediation_result.msg | default('') }}"
+          - "Checking if system is still operational..."
+      when: rhel_stig_with_rollback_remediation_failed | default(false)
 
-  - name: Set failure details for remediation errors
-    ansible.builtin.set_fact:
-      rhel_stig_with_rollback_failure_reason: "Remediation script failed"
-      rhel_stig_with_rollback_failure_exit_code: >-
-        {{ rhel_stig_with_rollback_remediation_result.rc }}
-      rhel_stig_with_rollback_failure_log_location: >-
-        {{ rhel_stig_with_rollback_stig_work_dir }}/remediation_{{
-        rhel_stig_with_rollback_backup_timestamp }}.log
-      rhel_stig_with_rollback_failure_type: "remediation"
-    when: rhel_stig_with_rollback_remediation_failed | default(false)
+    - name: Set failure details for remediation errors
+      ansible.builtin.set_fact:
+        rhel_stig_with_rollback_failure_reason: "Remediation playbook failed"
+        rhel_stig_with_rollback_failure_exit_code: "playbook_error"
+        rhel_stig_with_rollback_failure_log_location: >-
+          {{ rhel_stig_with_rollback_stig_work_dir }}/remediation_{{ rhel_stig_with_rollback_backup_timestamp }}.log
+        rhel_stig_with_rollback_failure_type: "remediation"
+      when: rhel_stig_with_rollback_remediation_failed | default(false)
+
   rescue:
     - name: Capture exception details
       ansible.builtin.set_fact:
-        rhel_stig_with_rollback_failure_reason: "Remediation script execution error"
+        rhel_stig_with_rollback_failure_reason: "{{ ansible_failed_result.msg | default('Remediation execution error') }}"
         rhel_stig_with_rollback_failure_log_location: >-
-          {{ rhel_stig_with_rollback_stig_work_dir }}/remediation_{{
-          rhel_stig_with_rollback_backup_timestamp }}.log
+          {{ rhel_stig_with_rollback_stig_work_dir }}/remediation_{{ rhel_stig_with_rollback_backup_timestamp }}.log
         rhel_stig_with_rollback_failure_type: "remediation_exception"
-        rhel_stig_with_rollback_failure_exit_code: >-
-          {{ rhel_stig_with_rollback_remediation_result.rc | default('unknown') }}
+        rhel_stig_with_rollback_failure_exit_code: "exception"
 
     - name: Note remediation exception
       ansible.builtin.debug:
         msg:
-          - "⚠️  Remediation script encountered an exception"
-          - "This does NOT automatically mean the system is broken."
-          - "The operational check will determine if rollback is needed."
+          - "⚠️  Remediation failed on task: {{ ansible_failed_task.name | default('unknown') }}"
+          - "Error message: {{ ansible_failed_result.msg | default('none') }}"
