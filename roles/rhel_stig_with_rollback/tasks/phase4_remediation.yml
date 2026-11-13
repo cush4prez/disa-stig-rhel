@@ -101,10 +101,14 @@
       ansible.builtin.set_fact:
         _extracted_remediation_tasks: >-
           {%- set play_vars = _parsed_oscap_play.vars | default({}) -%}
+          {%- set tailoring_vars = rhel_stig_with_rollback_tailoring_vars | default({}) -%}
           {%- set all_tasks = _parsed_oscap_play.tasks | default([]) -%}
           {%- set out_tasks = [] -%}
           {%- if play_vars | length > 0 -%}
             {%- set _ = out_tasks.append({'name': 'Load OSCAP playbook variables', 'ansible.builtin.set_fact': play_vars}) -%}
+          {%- endif -%}
+          {%- if tailoring_vars | length > 0 -%}
+            {%- set _ = out_tasks.append({'name': 'Apply organization tailoring overrides', 'ansible.builtin.set_fact': tailoring_vars}) -%}
           {%- endif -%}
           {%- if not rhel_stig_with_rollback_selective_mode -%}
             {%- set _ = out_tasks.extend(all_tasks) -%}
@@ -138,7 +142,11 @@
         msg: "0 tasks matched requested rules: {{ _normalized_requested_rules | join(', ') }}"
       when: >
         rhel_stig_with_rollback_selective_mode and
-        (_extracted_remediation_tasks | length <= (1 if (_parsed_oscap_play.vars | default({}) | length > 0) else 0))
+        (
+          _extracted_remediation_tasks | length <=
+          ((1 if (_parsed_oscap_play.vars | default({}) | length > 0) else 0) +
+           (1 if (rhel_stig_with_rollback_tailoring_vars | default({}) | length > 0) else 0))
+        )
 
     - name: Write executable task list on controller
       ansible.builtin.copy:

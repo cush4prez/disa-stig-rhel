@@ -2,11 +2,14 @@
 # Load organization-specific STIG tailoring variables
 # This task loads custom security control variables from tailoring files
 
+- name: Normalize tailoring profile name
+  ansible.builtin.set_fact:
+    rhel_stig_with_rollback_tailoring_profile: "{{ rhel_stig_with_rollback_tailoring_profile | default('') | string | trim }}"
+
 - name: Check if tailoring profile is specified
   ansible.builtin.set_fact:
     rhel_stig_with_rollback_use_tailoring: >-
-      {{ rhel_stig_with_rollback_tailoring_profile is defined and
-         rhel_stig_with_rollback_tailoring_profile | length > 0 }}
+      {{ rhel_stig_with_rollback_tailoring_profile | length > 0 }}
 
 - name: Display tailoring status
   ansible.builtin.debug:
