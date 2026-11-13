@@ -2,7 +2,7 @@
 # Phase 4: Generate and apply STIG remediations (100% Native Ansible - Full, Selective & Tailoring)
 
 - name: Apply STIG hardening
-  when: rhel_stig_with_rollback_apply_remediations
+  when: rhel_stig_with_rollback_apply_remediations | bool
   block:
     - name: Normalize audit mode and selected rules list
       ansible.builtin.set_fact:
@@ -154,7 +154,10 @@
     - name: Execute remediation tasks natively over active AAP session
       block:
         - name: Include remediation tasks
-          ansible.builtin.include_tasks: "/tmp/remediation_tasks_{{ inventory_hostname }}_{{ rhel_stig_with_rollback_backup_timestamp }}.yml"
+          ansible.builtin.include_tasks:
+            file: "/tmp/remediation_tasks_{{ inventory_hostname }}_{{ rhel_stig_with_rollback_backup_timestamp }}.yml"
+            apply:
+              ignore_errors: true
       rescue:
         - name: Capture remediation errors
           ansible.builtin.set_fact:
