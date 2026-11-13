@@ -1,10 +1,10 @@
 ---
-# Phase 4: Generate and apply STIG remediations (100% Native Ansible - Full, Selective & Tailoring)
+# Phase 4: Generate and apply STIG remediations (100% Native Ansible - Full, Selective, Exclusions & Tailoring)
 
 - name: Apply STIG hardening
   when: rhel_stig_with_rollback_apply_remediations | bool
   block:
-    - name: Normalize audit mode and selected rules list
+    - name: Normalize audit mode, selected rules, and excluded rules lists
       ansible.builtin.set_fact:
         _normalized_rules_list: >-
           {%- set raw = rhel_stig_with_rollback_stig_rules_to_apply | default([]) -%}
@@ -12,6 +12,15 @@
             {{ raw.replace('\n', ',').split(',') | map('trim') | reject('equalto', '') | list }}
           {%- elif raw is iterable -%}
             {{ raw | map('trim') | reject('equalto', '') | list }}
+          {%- else -%}
+            []
+          {%- endif -%}
+        _normalized_exclude_list: >-
+          {%- set raw_excl = rhel_stig_with_rollback_stig_rules_to_exclude | default([]) -%}
+          {%- if raw_excl is string -%}
+            {{ raw_excl.replace('\n', ',').split(',') | map('trim') | reject('equalto', '') | list }}
+          {%- elif raw_excl is iterable -%}
+            {{ raw_excl | map('trim') | reject('equalto', '') | list }}
           {%- else -%}
             []
           {%- endif -%}
@@ -36,6 +45,7 @@
             (_normalized_rules_list | length > 0)
           }}
         rhel_stig_with_rollback_stig_rules_to_apply: "{{ _normalized_rules_list }}"
+        rhel_stig_with_rollback_stig_rules_to_exclude: "{{ _normalized_exclude_list }}"
 
     - name: Display remediation mode
       ansible.builtin.debug:
@@ -49,6 +59,11 @@
           - >-
             {% if rhel_stig_with_rollback_selective_mode -%}
             Selected rules:{% for rule in rhel_stig_with_rollback_stig_rules_to_apply %}  - {{ rule }}{% endfor %}
+            {%- endif %}
+          - >-
+            {% if not rhel_stig_with_rollback_selective_mode and (rhel_stig_with_rollback_stig_rules_to_exclude | length > 0) -%}
+            Excluded rules ({{ rhel_stig_with_rollback_stig_rules_to_exclude | length }}):
+            {% for rule in rhel_stig_with_rollback_stig_rules_to_exclude %}  - {{ rule }}{% endfor %}
             {%- endif %}
           - "========================================================================="
 
@@ -97,6 +112,7 @@
           {%- set tailoring_vars = rhel_stig_with_rollback_tailoring_vars | default({}) -%}
           {%- set all_tasks = play.tasks | default([]) -%}
           {%- set req_rules = rhel_stig_with_rollback_stig_rules_to_apply | map('regex_replace', '^.*_rule_', '') | list -%}
+          {%- set excl_rules = rhel_stig_with_rollback_stig_rules_to_exclude | map('regex_replace', '^.*_rule_', '') | list -%}
           {%- set out_tasks = [] -%}
           {%- if play_vars | length > 0 -%}
             {%- set _ = out_tasks.append({'name': 'Load OSCAP playbook variables', 'ansible.builtin.set_fact': play_vars}) -%}
@@ -105,7 +121,28 @@
             {%- set _ = out_tasks.append({'name': 'Apply organization tailoring overrides', 'ansible.builtin.set_fact': tailoring_vars}) -%}
           {%- endif -%}
           {%- if not rhel_stig_with_rollback_selective_mode -%}
-            {%- set _ = out_tasks.extend(all_tasks) -%}
+            {%- if excl_rules | length == 0 -%}
+              {%- set _ = out_tasks.extend(all_tasks) -%}
+            {%- else -%}
+              {%- for task in all_tasks -%}
+                {%- set ns = namespace(excluded=false) -%}
+                {%- set tname = task.name | default('') -%}
+                {%- if '_rule_' in tname -%}
+                  {%- set short_from_name = tname | regex_replace('^.*_rule_([^\\s\'\"]+).*$', '\\1') -%}
+                  {%- if short_from_name in excl_rules -%}
+                    {%- set ns.excluded = true -%}
+                  {%- endif -%}
+                {%- endif -%}
+                {%- for tag in task.tags | default([]) -%}
+                  {%- if tag is string and (tag | regex_replace('^.*_rule_', '')) in excl_rules -%}
+                    {%- set ns.excluded = true -%}
+                  {%- endif -%}
+                {%- endfor -%}
+                {%- if not ns.excluded -%}
+                  {%- set _ = out_tasks.append(task) -%}
+                {%- endif -%}
+              {%- endfor -%}
+            {%- endif -%}
           {%- else -%}
             {%- for task in all_tasks -%}
               {%- set ns = namespace(matched=false) -%}
@@ -219,6 +256,13 @@
           {% if rhel_stig_with_rollback_selective_mode %}
           SELECTED RULES ({{ rhel_stig_with_rollback_stig_rules_to_apply | length }}):
           {% for rule in rhel_stig_with_rollback_stig_rules_to_apply %}
+            - {{ rule }}
+          {% endfor %}
+          {% endif %}
+
+          {% if not rhel_stig_with_rollback_selective_mode and (rhel_stig_with_rollback_stig_rules_to_exclude | length > 0) %}
+          EXCLUDED RULES ({{ rhel_stig_with_rollback_stig_rules_to_exclude | length }}):
+          {% for rule in rhel_stig_with_rollback_stig_rules_to_exclude %}
             - {{ rule }}
           {% endfor %}
           {% endif %}
