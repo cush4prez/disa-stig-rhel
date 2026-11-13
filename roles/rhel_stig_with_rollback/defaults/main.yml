@@ -59,3 +59,8 @@ rhel_stig_with_rollback_rollback_on_critical_service_failure: true
 rhel_stig_with_rollback_critical_services:
   - sshd
   - NetworkManager
+
+# Optional list of rule IDs to skip during full remediation
+rhel_stig_with_rollback_stig_rules_to_exclude:
+  - ensure_gpgcheck_never_disabled
+  - aide_build_database

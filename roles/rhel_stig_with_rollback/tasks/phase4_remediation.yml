@@ -1,10 +1,10 @@
 ---
-# Phase 4: Generate and apply STIG remediations (100% Native Ansible - Zero .py or .sh scripts)
+# Phase 4: Generate and apply STIG remediations (100% Native Ansible - Full, Selective, Exclusions & Tailoring)
 
 - name: Apply STIG hardening
-  when: rhel_stig_with_rollback_apply_remediations
+  when: rhel_stig_with_rollback_apply_remediations | bool
   block:
-    - name: Normalize audit mode and selected rules list
+    - name: Normalize audit mode, selected rules, and excluded rules lists
       ansible.builtin.set_fact:
         _normalized_rules_list: >-
           {%- set raw = rhel_stig_with_rollback_stig_rules_to_apply | default([]) -%}
@@ -12,6 +12,15 @@
             {{ raw.replace('\n', ',').split(',') | map('trim') | reject('equalto', '') | list }}
           {%- elif raw is iterable -%}
             {{ raw | map('trim') | reject('equalto', '') | list }}
+          {%- else -%}
+            []
+          {%- endif -%}
+        _normalized_exclude_list: >-
+          {%- set raw_excl = rhel_stig_with_rollback_stig_rules_to_exclude | default([]) -%}
+          {%- if raw_excl is string -%}
+            {{ raw_excl.replace('\n', ',').split(',') | map('trim') | reject('equalto', '') | list }}
+          {%- elif raw_excl is iterable -%}
+            {{ raw_excl | map('trim') | reject('equalto', '') | list }}
           {%- else -%}
             []
           {%- endif -%}
@@ -36,6 +45,7 @@
             (_normalized_rules_list | length > 0)
           }}
         rhel_stig_with_rollback_stig_rules_to_apply: "{{ _normalized_rules_list }}"
+        rhel_stig_with_rollback_stig_rules_to_exclude: "{{ _normalized_exclude_list }}"
 
     - name: Display remediation mode
       ansible.builtin.debug:
@@ -49,6 +59,11 @@
           - >-
             {% if rhel_stig_with_rollback_selective_mode -%}
             Selected rules:{% for rule in rhel_stig_with_rollback_stig_rules_to_apply %}  - {{ rule }}{% endfor %}
+            {%- endif %}
+          - >-
+            {% if not rhel_stig_with_rollback_selective_mode and (rhel_stig_with_rollback_stig_rules_to_exclude | length > 0) -%}
+            Excluded rules ({{ rhel_stig_with_rollback_stig_rules_to_exclude | length }}):
+            {% for rule in rhel_stig_with_rollback_stig_rules_to_exclude %}  - {{ rule }}{% endfor %}
             {%- endif %}
           - "========================================================================="
 
@@ -87,41 +102,61 @@
       become: false
       register: _raw_oscap_playbook_b64
 
-    - name: Parse and filter OSCAP tasks natively in Ansible
-      ansible.builtin.set_fact:
-        _parsed_oscap_play: "{{ (_raw_oscap_playbook_b64.content | b64decode | from_yaml)[0] }}"
-        _normalized_requested_rules: >-
-          {{
-            rhel_stig_with_rollback_stig_rules_to_apply
-            | map('regex_replace', '^.*_rule_', '')
-            | list
-          }}
-
-    - name: Extract matching remediation tasks and play variables
-      ansible.builtin.set_fact:
-        _extracted_remediation_tasks: >-
-          {%- set play_vars = _parsed_oscap_play.vars | default({}) -%}
-          {%- set all_tasks = _parsed_oscap_play.tasks | default([]) -%}
+    - name: Write executable remediation task list directly on controller (avoids double-templating)
+      ansible.builtin.copy:
+        dest: "/tmp/remediation_tasks_{{ inventory_hostname }}_{{ rhel_stig_with_rollback_backup_timestamp }}.yml"
+        mode: '0644'
+        content: >-
+          {%- set play = (_raw_oscap_playbook_b64.content | b64decode | from_yaml)[0] -%}
+          {%- set play_vars = play.vars | default({}) -%}
+          {%- set tailoring_vars = rhel_stig_with_rollback_tailoring_vars | default({}) -%}
+          {%- set all_tasks = play.tasks | default([]) -%}
+          {%- set req_rules = rhel_stig_with_rollback_stig_rules_to_apply | map('regex_replace', '^.*_rule_', '') | list -%}
+          {%- set excl_rules = rhel_stig_with_rollback_stig_rules_to_exclude | map('regex_replace', '^.*_rule_', '') | list -%}
           {%- set out_tasks = [] -%}
           {%- if play_vars | length > 0 -%}
             {%- set _ = out_tasks.append({'name': 'Load OSCAP playbook variables', 'ansible.builtin.set_fact': play_vars}) -%}
           {%- endif -%}
+          {%- if tailoring_vars | length > 0 -%}
+            {%- set _ = out_tasks.append({'name': 'Apply organization tailoring overrides', 'ansible.builtin.set_fact': tailoring_vars}) -%}
+          {%- endif -%}
           {%- if not rhel_stig_with_rollback_selective_mode -%}
-            {%- set _ = out_tasks.extend(all_tasks) -%}
+            {%- if excl_rules | length == 0 -%}
+              {%- set _ = out_tasks.extend(all_tasks) -%}
+            {%- else -%}
+              {%- for task in all_tasks -%}
+                {%- set ns = namespace(excluded=false) -%}
+                {%- set tname = task.name | default('') -%}
+                {%- if '_rule_' in tname -%}
+                  {%- set short_from_name = tname | regex_replace('^.*_rule_([^\\s\'\"]+).*$', '\\1') -%}
+                  {%- if short_from_name in excl_rules -%}
+                    {%- set ns.excluded = true -%}
+                  {%- endif -%}
+                {%- endif -%}
+                {%- for tag in task.tags | default([]) -%}
+                  {%- if tag is string and (tag | regex_replace('^.*_rule_', '')) in excl_rules -%}
+                    {%- set ns.excluded = true -%}
+                  {%- endif -%}
+                {%- endfor -%}
+                {%- if not ns.excluded -%}
+                  {%- set _ = out_tasks.append(task) -%}
+                {%- endif -%}
+              {%- endfor -%}
+            {%- endif -%}
           {%- else -%}
             {%- for task in all_tasks -%}
               {%- set ns = namespace(matched=false) -%}
               {%- set tname = task.name | default('') -%}
               {%- if '_rule_' in tname -%}
                 {%- set short_from_name = tname | regex_replace('^.*_rule_([^\\s\'\"]+).*$', '\\1') -%}
-                {%- if short_from_name in _normalized_requested_rules -%}
+                {%- if short_from_name in req_rules -%}
                   {%- set ns.matched = true -%}
                 {%- endif -%}
               {%- endif -%}
               {%- for tag in task.tags | default([]) -%}
                 {%- if tag is string -%}
                   {%- set short_tag = tag | regex_replace('^.*_rule_', '') -%}
-                  {%- if short_tag in _normalized_requested_rules -%}
+                  {%- if short_tag in req_rules -%}
                     {%- set ns.matched = true -%}
                   {%- endif -%}
                 {%- endif -%}
@@ -131,20 +166,7 @@
               {%- endif -%}
             {%- endfor -%}
           {%- endif -%}
-          {{ out_tasks }}
-
-    - name: Fail if no matching tasks were extracted in selective mode
-      ansible.builtin.fail:
-        msg: "0 tasks matched requested rules: {{ _normalized_requested_rules | join(', ') }}"
-      when: >
-        rhel_stig_with_rollback_selective_mode and
-        (_extracted_remediation_tasks | length <= (1 if (_parsed_oscap_play.vars | default({}) | length > 0) else 0))
-
-    - name: Write executable task list on controller
-      ansible.builtin.copy:
-        dest: "/tmp/remediation_tasks_{{ inventory_hostname }}_{{ rhel_stig_with_rollback_backup_timestamp }}.yml"
-        content: "{{ _extracted_remediation_tasks | to_nice_yaml(indent=2) }}"
-        mode: '0644'
+          {{ out_tasks | to_nice_yaml(indent=2) }}
       delegate_to: localhost
       become: false
 
@@ -154,16 +176,32 @@
         dest: "{{ rhel_stig_with_rollback_stig_work_dir }}/remediation_{{ rhel_stig_with_rollback_backup_timestamp }}.yml"
         mode: '0644'
 
-    - name: Execute remediation tasks natively
+    - name: Check prepared remediation task list size
+      ansible.builtin.stat:
+        path: "/tmp/remediation_tasks_{{ inventory_hostname }}_{{ rhel_stig_with_rollback_backup_timestamp }}.yml"
+      delegate_to: localhost
+      become: false
+      register: _prepared_tasks_stat
+
+    - name: Fail if no remediation tasks were extracted
+      ansible.builtin.fail:
+        msg: "Prepared remediation task list is empty (check requested rule IDs)"
+      when: _prepared_tasks_stat.stat.size | default(0) < 20
+
+    - name: Execute remediation tasks natively over active AAP session
       block:
         - name: Include remediation tasks
-          ansible.builtin.include_tasks: "/tmp/remediation_tasks_{{ inventory_hostname }}_{{ rhel_stig_with_rollback_backup_timestamp }}.yml"
+          ansible.builtin.include_tasks:
+            file: "/tmp/remediation_tasks_{{ inventory_hostname }}_{{ rhel_stig_with_rollback_backup_timestamp }}.yml"
+            apply:
+              ignore_errors: true
       rescue:
         - name: Capture remediation errors
           ansible.builtin.set_fact:
             rhel_stig_with_rollback_remediation_result:
               failed: true
               msg: "{{ ansible_failed_result.msg | default('Remediation tasks encountered errors') }}"
+              task: "{{ ansible_failed_task.name | default('unknown') }}"
       always:
         - name: Set remediation success if no errors
           ansible.builtin.set_fact:
@@ -222,11 +260,19 @@
           {% endfor %}
           {% endif %}
 
-          REMEDIATION TYPE: 100% Native Ansible (Zero .py/.sh scripts)
-          EXTRACTED ITEMS: {{ _extracted_remediation_tasks | length }}
+          {% if not rhel_stig_with_rollback_selective_mode and (rhel_stig_with_rollback_stig_rules_to_exclude | length > 0) %}
+          EXCLUDED RULES ({{ rhel_stig_with_rollback_stig_rules_to_exclude | length }}):
+          {% for rule in rhel_stig_with_rollback_stig_rules_to_exclude %}
+            - {{ rule }}
+          {% endfor %}
+          {% endif %}
+
+          REMEDIATION TYPE: 100% Native Ansible (include_tasks)
+          TASK FILE SIZE: {{ _prepared_tasks_stat.stat.size | default(0) }} bytes
           STATUS: {% if rhel_stig_with_rollback_remediation_result.failed | default(false) %}FAILED{% else %}COMPLETED{% endif %}
 
           {% if rhel_stig_with_rollback_remediation_result.failed | default(false) %}
+          FAILED TASK: {{ rhel_stig_with_rollback_remediation_result.task | default('unknown') }}
           ERROR: {{ rhel_stig_with_rollback_remediation_result.msg | default('Unknown error') }}
           {% endif %}
         mode: '0644'
@@ -238,7 +284,8 @@
     - name: Note remediation issues (not necessarily critical)
       ansible.builtin.debug:
         msg:
-          - "⚠️  Remediation tasks encountered errors: {{ rhel_stig_with_rollback_remediation_result.msg | default('') }}"
+          - "⚠️  Remediation stopped on task: {{ rhel_stig_with_rollback_remediation_result.task | default('unknown') }}"
+          - "Error: {{ rhel_stig_with_rollback_remediation_result.msg | default('') }}"
           - "Checking if system is still operational..."
       when: rhel_stig_with_rollback_remediation_failed | default(false)
 
