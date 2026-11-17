@@ -413,8 +413,7 @@ rhel_stig_with_rollback_scap_tailoring_file: /path/to/tailoring.xml
 | `roles/rhel_stig_with_rollback/defaults/main.yml` | Default variables |
 | `roles/rhel_stig_with_rollback/tasks/phase3_baseline_audit.yml` | Selective audit logic |
 | `roles/rhel_stig_with_rollback/tasks/phase4_remediation.yml` | Selective remediation logic |
-| `files/filter_audit_results.py` | Filters audit XML for selected rules |
-| `files/filter_remediation_playbook.py` | Filters remediation playbook for selected rules |
+| `roles/rhel_stig_with_rollback/files/filter_ansible_playbook.py` | Filters Ansible playbooks for selected rules |
 
 ---
 
