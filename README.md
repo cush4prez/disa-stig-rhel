@@ -62,7 +62,7 @@ Or create your own minimal playbook:
 - ✅ No duplicate logic
 - ✅ Recommended for AAP deployments
 
-See [docs/PLAYBOOK_USAGE.md](docs/PLAYBOOK_USAGE.md) for comparison of all playbooks.
+See [docs/operations/PLAYBOOK_USAGE.md](docs/operations/PLAYBOOK_USAGE.md) for comparison of all playbooks.
 
 ### Option 3: Ansible Automation Platform (AAP 2.7)
 
@@ -81,7 +81,7 @@ See [docs/PLAYBOOK_USAGE.md](docs/PLAYBOOK_USAGE.md) for comparison of all playb
 
 **Note**: The survey works with `site.yml` because it calls the role. The role automatically processes survey variables via its `pre_tasks`.
 
-See [docs/AAP_COMPLETE_GUIDE.md](docs/AAP_COMPLETE_GUIDE.md) for complete step-by-step instructions.
+See [docs/getting-started/AAP_COMPLETE_GUIDE.md](docs/getting-started/AAP_COMPLETE_GUIDE.md) for complete step-by-step instructions.
 
 ## Available Playbooks
 
@@ -135,7 +135,7 @@ rhel_stig_with_rollback_stig_rules_to_apply:
 rhel_stig_with_rollback_stig_rules_to_apply: []
 ```
 
-See [docs/SURVEY_CONFIGURATION.md](docs/SURVEY_CONFIGURATION.md) for complete guide.
+See [docs/getting-started/SURVEY_CONFIGURATION.md](docs/getting-started/SURVEY_CONFIGURATION.md) for complete guide.
 
 ## Organization Tailoring
 
@@ -164,29 +164,22 @@ ansible-playbook -i inventory playbooks/rhel_stig_with_rollback.yml \
 - `sshd_idle_timeout_value` - SSH idle timeout
 - `var_auditd_max_log_file` - Audit log size
 
-See [docs/TAILORING_GUIDE.md](docs/TAILORING_GUIDE.md) for complete documentation.
+See [docs/getting-started/TAILORING_GUIDE.md](docs/getting-started/TAILORING_GUIDE.md) for complete documentation.
 
-## Native Ansible Parsing
+## Native Ansible Implementation
 
-**New Feature:** XML parsing using native Ansible modules instead of Python scripts.
+This project uses native Ansible modules for all XML parsing and remediation:
+
+- **XML Parsing** - Uses `community.general.xml` module for OSCAP result processing
+- **Remediation** - Generates and executes Ansible playbooks (not bash scripts)
+- **Filtering** - Single Python script (`filter_ansible_playbook.py`) for selective mode
 
 ### Benefits
 
-- 🔒 **Better Security** - No script execution on target hosts
-- 🚀 **Easier Maintenance** - Pure Ansible, no Python expertise required
-- ✅ **Built-in Idempotency** - Declarative approach with Ansible's error handling
-- 📦 **No Script Distribution** - Reduces attack surface and deployment complexity
-
-### Usage
-
-Native parsing is enabled by default. To use legacy Python scripts:
-
-```yaml
-# group_vars/all.yml or extra vars
-rhel_stig_with_rollback_use_native_parsing: false
-```
-
-See [docs/NATIVE_ANSIBLE_MIGRATION.md](docs/NATIVE_ANSIBLE_MIGRATION.md) for complete details.
+- 🔒 **Better Security** - Minimal script execution, native Ansible modules
+- 🚀 **Easier Maintenance** - Pure Ansible approach
+- ✅ **Built-in Idempotency** - Declarative Ansible behavior
+- 📦 **Reduced Dependencies** - Only requires `community.general` collection
 
 ## Role Variables
 
@@ -204,11 +197,6 @@ See [docs/NATIVE_ANSIBLE_MIGRATION.md](docs/NATIVE_ANSIBLE_MIGRATION.md) for com
 |----------|---------|-------------|
 | `rhel_stig_with_rollback_tailoring_profile` | `""` | Organization tailoring profile (empty = defaults) |
 
-### Parsing Method
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `rhel_stig_with_rollback_use_native_parsing` | `true` | Use native Ansible XML parsing (recommended) |
 
 ### Selective STIG Settings
 
@@ -228,21 +216,23 @@ See `roles/rhel_stig_with_rollback/defaults/main.yml` for all variables.
 
 ## Documentation
 
-### Essential Guides
+### Getting Started
 
-- **[AAP_COMPLETE_GUIDE.md](docs/AAP_COMPLETE_GUIDE.md)** - Complete AAP 2.7 setup and usage
-- **[SURVEY_CONFIGURATION.md](docs/SURVEY_CONFIGURATION.md)** - Survey setup and selective STIG workflow
-- **[TAILORING_GUIDE.md](docs/TAILORING_GUIDE.md)** - Organization-specific STIG variable customization
-- **[NATIVE_ANSIBLE_MIGRATION.md](docs/NATIVE_ANSIBLE_MIGRATION.md)** - Native Ansible XML parsing (recommended)
-- **[RHEL8_COMPATIBILITY.md](docs/RHEL8_COMPATIBILITY.md)** - RHEL 8 compatibility and try-fallback pattern
-- **[TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** - Common issues and solutions
-- **[DISASTER_RECOVERY.md](docs/DISASTER_RECOVERY.md)** - Emergency recovery procedures
+- **[AAP_COMPLETE_GUIDE.md](docs/getting-started/AAP_COMPLETE_GUIDE.md)** - Complete AAP 2.7 setup and usage
+- **[SURVEY_CONFIGURATION.md](docs/getting-started/SURVEY_CONFIGURATION.md)** - Survey setup and selective STIG workflow
+- **[TAILORING_GUIDE.md](docs/getting-started/TAILORING_GUIDE.md)** - Organization-specific STIG variable customization
 
-### Reference Guides
+### Operations
 
-- **[PLAYBOOK_USAGE.md](docs/PLAYBOOK_USAGE.md)** - Which playbooks to use (IMPORTANT)
-- **[PLAYBOOK_REFERENCE.md](docs/PLAYBOOK_REFERENCE.md)** - Complete playbook descriptions
-- **[ROLE_DOCUMENTATION.md](docs/ROLE_DOCUMENTATION.md)** - Role architecture and phases
+- **[PLAYBOOK_USAGE.md](docs/operations/PLAYBOOK_USAGE.md)** - Which playbooks to use (IMPORTANT)
+- **[TROUBLESHOOTING.md](docs/operations/TROUBLESHOOTING.md)** - Common issues and solutions
+- **[DISASTER_RECOVERY.md](docs/operations/DISASTER_RECOVERY.md)** - Emergency recovery procedures
+
+### Reference
+
+- **[PLAYBOOK_REFERENCE.md](docs/reference/PLAYBOOK_REFERENCE.md)** - Complete playbook descriptions
+- **[ROLE_DOCUMENTATION.md](docs/reference/ROLE_DOCUMENTATION.md)** - Role architecture and phases
+- **[TAILORING_EXAMPLES.md](docs/reference/TAILORING_EXAMPLES.md)** - Tailoring variable examples
 
 ## Requirements
 
@@ -251,8 +241,8 @@ See `roles/rhel_stig_with_rollback/defaults/main.yml` for all variables.
 - scap-security-guide
 - Ansible 2.9+
 - Ansible Collections:
-  - `community.general` >= 8.0.0 (for native XML parsing)
-- python3-lxml (auto-installed on RHEL 8 if missing)
+  - `community.general` >= 8.0.0 (for XML parsing)
+- python3-lxml (for `community.general.xml` module)
 
 Install collections:
 ```bash
@@ -260,8 +250,6 @@ ansible-galaxy collection install -r requirements.yml
 ```
 
 The role automatically installs missing SCAP packages and python3-lxml dependencies.
-
-**Note**: For RHEL 8 compatibility, see [docs/RHEL8_COMPATIBILITY.md](docs/RHEL8_COMPATIBILITY.md)
 
 ## Common Tasks
 
@@ -321,21 +309,14 @@ ansible-playbook -i inventory playbooks/emergency_restore_from_controller.yml \
 │       │   ├── phase5_verification.yml     # Operational checks
 │       │   ├── phase6_summary.yml          # Final report
 │       │   └── rollback.yml                # Rollback logic
+│       ├── files/
+│       │   └── filter_ansible_playbook.py  # Selective mode filter
 │       ├── defaults/main.yml               # Default variables
 │       └── handlers/main.yml               # Handlers
-├── files/                        # Scripts and utilities
-│   ├── parse_oscap_score.py                # Score parser
-│   ├── parse_oscap_failures.py             # Failure categorizer
-│   ├── filter_audit_results.py             # Selective audit filter
-│   └── filter_remediation_playbook.py      # Selective remediation filter
 ├── docs/                         # Documentation
-│   ├── AAP_COMPLETE_GUIDE.md               # AAP setup and usage
-│   ├── SURVEY_CONFIGURATION.md             # Survey and selective STIG
-│   ├── TROUBLESHOOTING.md                  # Problem solving
-│   ├── DISASTER_RECOVERY.md                # Emergency recovery
-│   ├── PLAYBOOK_REFERENCE.md               # All playbooks documented
-│   ├── ROLE_DOCUMENTATION.md               # Role internals
-│   └── aap_survey_configuration.json       # AAP survey template
+│   ├── getting-started/          # Setup and configuration guides
+│   ├── operations/               # Operational guides
+│   └── reference/                # Technical reference
 ├── group_vars/                   # Group variables
 └── host_vars/                    # Host variables
 ```
@@ -352,7 +333,7 @@ ansible-playbook -i inventory playbooks/emergency_restore_from_controller.yml \
 ## Support
 
 For issues or questions:
-1. Check [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
+1. Check [docs/operations/TROUBLESHOOTING.md](docs/operations/TROUBLESHOOTING.md)
 2. Review playbook logs in `/opt/stig_work/`
 3. Check audit reports in `/opt/stig_audit/`
 

@@ -995,10 +995,9 @@ Create scheduled jobs to:
 ## Additional Resources
 
 - [TAILORING_GUIDE.md](TAILORING_GUIDE.md) - Customize STIG variables
-- [RHEL8_COMPATIBILITY.md](RHEL8_COMPATIBILITY.md) - RHEL 8 specific notes
-- [DISASTER_RECOVERY.md](DISASTER_RECOVERY.md) - Emergency procedures
-- [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - Common issues
-- [PLAYBOOK_USAGE.md](PLAYBOOK_USAGE.md) - Which playbook to use when
+- [../operations/DISASTER_RECOVERY.md](../operations/DISASTER_RECOVERY.md) - Emergency procedures
+- [../operations/TROUBLESHOOTING.md](../operations/TROUBLESHOOTING.md) - Common issues
+- [../operations/PLAYBOOK_USAGE.md](../operations/PLAYBOOK_USAGE.md) - Which playbook to use when
 
 ---
 
