@@ -1,5 +1,5 @@
 ---
-# Final STIG Audit Report
+# Final STIG Audit Report (100% Native Ansible - Zero Python Scripts)
 # Runs system operational verification and detailed compliance audit
 # Shows compliance score and failed controls by category (CAT I, II, III)
 
@@ -19,83 +19,13 @@
     # PHASE 1: SYSTEM OPERATIONAL VERIFICATION
     #########################################################################
 
-    - name: Initialize operational status
+    - name: Run native operational verification tasks
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/rhel_stig_with_rollback/tasks/verify_operational.yml"
+
+    - name: Map role operational facts to report variables
       ansible.builtin.set_fact:
-        system_is_operable: true
-        operational_failures: []
-        operational_warnings: []
-
-    - name: Test basic command execution
-      ansible.builtin.command: echo "System responsive"
-      register: echo_test
-      failed_when: false
-      changed_when: false
-
-    - name: Check command execution
-      ansible.builtin.set_fact:
-        system_is_operable: false
-        operational_failures: "{{ operational_failures + ['Cannot execute basic commands'] }}"
-      when: echo_test.rc != 0
-
-    - name: Check SSH service status
-      ansible.builtin.systemd:
-        name: sshd
-      register: sshd_status
-      failed_when: false
-
-    - name: Verify SSH is running
-      ansible.builtin.set_fact:
-        system_is_operable: false
-        operational_failures: "{{ operational_failures + ['SSH service is not running'] }}"
-      when: sshd_status.status.ActiveState | default('unknown') != "active"
-
-    - name: Test SSH is listening
-      ansible.builtin.wait_for:
-        port: 22
-        timeout: 5
-        state: started
-      register: ssh_listening
-      failed_when: false
-
-    - name: Check SSH port accessibility
-      ansible.builtin.set_fact:
-        system_is_operable: false
-        operational_failures: "{{ operational_failures + ['SSH not listening on port 22'] }}"
-      when: ssh_listening.failed | default(false)
-
-    - name: Verify critical PAM files exist
-      ansible.builtin.stat:
-        path: "{{ item }}"
-      loop:
-        - /etc/pam.d/system-auth
-        - /etc/pam.d/password-auth
-        - /etc/pam.d/sshd
-      register: pam_files
-      failed_when: false
-
-    - name: Check PAM configuration
-      ansible.builtin.set_fact:
-        system_is_operable: false
-        operational_failures: "{{ operational_failures + ['Critical PAM files missing'] }}"
-      when: pam_files.results | selectattr('stat.exists', 'equalto', false) | list | length > 0
-
-    - name: Check root filesystem is writable
-      ansible.builtin.command: touch /tmp/.stig_audit_test
-      register: fs_write_test
-      failed_when: false
-      changed_when: false
-
-    - name: Verify filesystem is writable
-      ansible.builtin.set_fact:
-        system_is_operable: false
-        operational_failures: "{{ operational_failures + ['Root filesystem is read-only'] }}"
-      when: fs_write_test.rc != 0
-
-    - name: Cleanup test file
-      ansible.builtin.file:
-        path: /tmp/.stig_audit_test
-        state: absent
-      failed_when: false
+        system_is_operable: "{{ rhel_stig_with_rollback_system_is_operable | default(true) }}"
+        operational_failures: "{{ rhel_stig_with_rollback_operational_failures | default([]) }}"
 
     #########################################################################
     # PHASE 2: COMPLIANCE AUDIT
@@ -150,47 +80,36 @@
       when: not audit_xml_stat.stat.exists
 
     #########################################################################
-    # PHASE 3: PARSE RESULTS & COMPLIANCE SCORE
+    # PHASE 3: PARSE RESULTS & COMPLIANCE SCORE (100% NATIVE ANSIBLE)
     #########################################################################
 
-    - name: Copy parse score script
-      ansible.builtin.copy:
-        content: "{{ lookup('file', playbook_dir ~ '/../files/parse_oscap_score.py') }}"
-        dest: "{{ stig_work_dir }}/parse_oscap_score.py"
-        mode: '0755'
+    - name: Parse compliance score with native Ansible
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/rhel_stig_with_rollback/tasks/parse_oscap_score.yml"
+      vars:
+        oscap_xml_file: "{{ stig_audit_dir }}/final_audit_{{ audit_timestamp }}.xml"
 
-    - name: Parse compliance score
-      ansible.builtin.command: "{{ stig_work_dir }}/parse_oscap_score.py {{ stig_audit_dir }}/final_audit_{{ audit_timestamp }}.xml"
-      register: compliance_score
-      changed_when: false
+    - name: Parse failures by category with native Ansible
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/rhel_stig_with_rollback/tasks/parse_oscap_failures.yml"
+      vars:
+        oscap_xml_file: "{{ stig_audit_dir }}/final_audit_{{ audit_timestamp }}.xml"
 
-    - name: Copy failures parser script
-      ansible.builtin.copy:
-        content: "{{ lookup('file', playbook_dir ~ '/../files/parse_oscap_failures.py') }}"
-        dest: "{{ stig_work_dir }}/parse_oscap_failures.py"
-        mode: '0755'
-
-    - name: Parse failures by category
-      ansible.builtin.command: "{{ stig_work_dir }}/parse_oscap_failures.py {{ stig_audit_dir }}/final_audit_{{ audit_timestamp }}.xml"
-      register: failures_json
-      changed_when: false
-
-    - name: Parse failures data
+    - name: Map native parsed facts to report variables
       ansible.builtin.set_fact:
-        failures_data: "{{ failures_json.stdout | from_json }}"
+        compliance_score_val: "{{ rhel_stig_with_rollback_oscap_compliance_score | default('0.0') }}"
+        failures_data: "{{ rhel_stig_with_rollback_oscap_failures }}"
 
     - name: Assess compliance level
       ansible.builtin.set_fact:
         compliance_level: >-
-          {%- if compliance_score.stdout | float >= 95 -%}
+          {%- if compliance_score_val | float >= 95 -%}
           EXCELLENT
-          {%- elif compliance_score.stdout | float >= 90 -%}
+          {%- elif compliance_score_val | float >= 90 -%}
           VERY GOOD
-          {%- elif compliance_score.stdout | float >= 80 -%}
+          {%- elif compliance_score_val | float >= 80 -%}
           GOOD
-          {%- elif compliance_score.stdout | float >= 70 -%}
+          {%- elif compliance_score_val | float >= 70 -%}
           ACCEPTABLE
-          {%- elif compliance_score.stdout | float >= 50 -%}
+          {%- elif compliance_score_val | float >= 50 -%}
           NEEDS IMPROVEMENT
           {%- else -%}
           CRITICAL
@@ -200,8 +119,8 @@
       ansible.builtin.set_fact:
         production_ready: >-
           {{ system_is_operable and
-             failures_data.cat1 | length == 0 and
-             compliance_score.stdout | float >= 80 }}
+             (failures_data.cat1 | length == 0) and
+             (compliance_score_val | float >= 80) }}
 
     #########################################################################
     # PHASE 4: EXECUTIVE CONSOLE DASHBOARD
@@ -230,7 +149,7 @@
           -------------------------------------------------------------------------
                                     COMPLIANCE OVERVIEW
           -------------------------------------------------------------------------
-          Compliance Score       : {{ compliance_score.stdout }}% ({{ compliance_level }})
+          Compliance Score       : {{ compliance_score_val }}% ({{ compliance_level }})
           Production Ready       : {% if production_ready %}✅ YES{% else %}❌ NO{% endif %}
 
           Total Checked          : {{ failures_data.pass_count + failures_data.fail_count }}
