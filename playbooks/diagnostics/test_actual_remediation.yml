@@ -1,4 +1,5 @@
 ---
+# Test Actual STIG Remediation Execution (100% Native Ansible - Zero Python/Bash Scripts)
 - name: Test Actual STIG Remediation Execution
   hosts: all
   become: true
@@ -27,225 +28,106 @@
       failed_when: false
       changed_when: false
 
-    - name: Copy parse script
-      ansible.builtin.copy:
-        src: "{{ playbook_dir }}/../files/parse_oscap_score.py"
-        dest: "{{ test_dir }}/parse_oscap_score.py"
-        mode: '0755'
+    - name: Get BEFORE score natively
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../../roles/rhel_stig_with_rollback/tasks/parse_oscap_score.yml"
+      vars:
+        oscap_xml_file: "{{ test_dir }}/before.xml"
 
-    - name: Get BEFORE score
-      ansible.builtin.command: "{{ test_dir }}/parse_oscap_score.py {{ test_dir }}/before.xml"
-      register: before_score
-      changed_when: false
-      failed_when: false
+    - name: Save BEFORE score
+      ansible.builtin.set_fact:
+        before_score_val: "{{ rhel_stig_with_rollback_oscap_compliance_score }}"
 
     - name: Display BEFORE score
       ansible.builtin.debug:
         msg:
           - "========================================================================="
-          - "BEFORE REMEDIATION"
-          - "========================================================================="
-          - "Compliance Score: {{ before_score.stdout }}%"
-          - "Scan Exit Code: {{ before_scan.rc }}"
+          - "BEFORE REMEDIATION: {{ before_score_val }}% (Exit Code: {{ before_scan.rc }})"
           - "========================================================================="
 
-    - name: Generate remediation script from data stream
+    - name: Generate Ansible remediation playbook from data stream
       ansible.builtin.command: >
         oscap xccdf generate fix
-        --fix-type bash
+        --fix-type ansible
         --profile {{ stig_profile_id }}
-        --output "{{ test_dir }}/remediation.sh"
+        --output "{{ test_dir }}/remediation.yml"
         "{{ scap_ds_path }}"
       register: gen_fix
       changed_when: false
 
-    - name: Check remediation script
-      ansible.builtin.stat:
-        path: "{{ test_dir }}/remediation.sh"
-      register: remed_script
+    - name: Fetch remediation playbook to controller
+      ansible.builtin.fetch:
+        src: "{{ test_dir }}/remediation.yml"
+        dest: "/tmp/test_remediation_{{ inventory_hostname }}.yml"
+        flat: true
 
-    - name: Display script generation result
-      ansible.builtin.debug:
-        msg:
-          - "========================================================================="
-          - "REMEDIATION SCRIPT GENERATION"
-          - "========================================================================="
-          - "Generated: {{ remed_script.stat.exists }}"
-          - "Size: {{ remed_script.stat.size | default(0) }} bytes"
-          - "Exit Code: {{ gen_fix.rc }}"
-          - "{% if gen_fix.stderr %}STDERR: {{ gen_fix.stderr }}{% endif %}"
-          - "========================================================================="
+    - name: Read remediation playbook on controller
+      ansible.builtin.slurp:
+        src: "/tmp/test_remediation_{{ inventory_hostname }}.yml"
+      delegate_to: localhost
+      become: false
+      register: _test_pb_b64
 
-    - name: Count functions in script
-      ansible.builtin.shell: grep -c "^function " "{{ test_dir }}/remediation.sh" || echo "0"
-      register: function_count
-      when: remed_script.stat.exists
-      changed_when: false
-      failed_when: false
+    - name: Write executable task list on controller
+      ansible.builtin.copy:
+        dest: "/tmp/test_remediation_tasks_{{ inventory_hostname }}.yml"
+        mode: '0644'
+        content: >-
+          {%- set play = (_test_pb_b64.content | b64decode | from_yaml)[0] -%}
+          {%- set out_tasks = [] -%}
+          {%- if play.vars | default({}) | length > 0 -%}
+            {%- set _ = out_tasks.append({'name': 'Load OSCAP variables', 'ansible.builtin.set_fact': play.vars}) -%}
+          {%- endif -%}
+          {%- set _ = out_tasks.extend(play.tasks | default([])) -%}
+          {{ out_tasks | to_nice_yaml(indent=2) }}
+      delegate_to: localhost
+      become: false
 
-    - name: Show script header
-      ansible.builtin.command: head -50 "{{ test_dir }}/remediation.sh"
-      register: script_header
-      when: remed_script.stat.exists
-      changed_when: false
-      failed_when: false
-
-    - name: Display script details
-      ansible.builtin.debug:
-        msg:
-          - "Script Header (first 50 lines):"
-          - "{{ script_header.stdout_lines }}"
-          - ""
-          - "Function Count: {{ function_count.stdout }}"
-      when: remed_script.stat.exists
-
-    - name: Set execute permission on remediation script
-      ansible.builtin.file:
-        path: "{{ test_dir }}/remediation.sh"
-        mode: '0700'
-      when: remed_script.stat.exists and remed_script.stat.size > 1000
-
-    - name: Execute remediation script (DRY RUN - show what would happen)
-      ansible.builtin.shell: |
-        set -o pipefail
-
-        # Run first 10 remediation functions only as a test
-        source "{{ test_dir }}/remediation.sh"
-
-        # Get list of remediation functions
-        FUNCTIONS=$(grep "^function remediate_" "{{ test_dir }}/remediation.sh" | head -10 | sed 's/function //' | sed 's/()//')
-
-        echo "Would execute these functions:"
-        echo "$FUNCTIONS"
-
-        # Actually run first one as a test
-        FIRST_FUNC=$(echo "$FUNCTIONS" | head -1)
-        echo ""
-        echo "Testing execution of: $FIRST_FUNC"
-        $FIRST_FUNC
-      args:
-        executable: /bin/bash
-        chdir: "{{ test_dir }}"
-      register: dry_run
-      when: remed_script.stat.exists and remed_script.stat.size > 1000
-      changed_when: false
-      failed_when: false
-
-    - name: Display dry run result
-      ansible.builtin.debug:
-        msg:
-          - "========================================================================="
-          - "DRY RUN - Testing First Remediation Function"
-          - "========================================================================="
-          - "{{ dry_run.stdout_lines }}"
-          - ""
-          - "{% if dry_run.stderr %}STDERR: {{ dry_run.stderr }}{% endif %}"
-          - "========================================================================="
-      when: remed_script.stat.exists and remed_script.stat.size > 1000
-
-    - name: Ask user if they want to run FULL remediation
+    - name: Ask user if they want to run FULL native Ansible remediation
       ansible.builtin.pause:
-        prompt: |
-
-          ========================================================================
-          READY TO RUN FULL REMEDIATION
-          ========================================================================
-
-          This will apply STIG hardening to the system.
-          System may require reboot after completion.
-
-          Continue with FULL remediation? (yes/no)
+        prompt: "Continue with FULL native Ansible STIG remediation? (yes/no)"
         echo: true
       register: user_confirm
-      when: remed_script.stat.exists and remed_script.stat.size > 1000
 
-    - name: Execute FULL remediation script
-      ansible.builtin.command: "{{ test_dir }}/remediation.sh"
-      args:
-        executable: /bin/bash
-        chdir: "{{ test_dir }}"
-      register: full_remediation
-      when:
-        - remed_script.stat.exists
-        - remed_script.stat.size > 1000
-        - user_confirm.user_input | lower == 'yes'
-      failed_when: false
-      changed_when: true
+    - name: Execute FULL native Ansible remediation tasks
+      when: user_confirm.user_input | lower == 'yes'
+      block:
+        - name: Include remediation tasks natively
+          ansible.builtin.include_tasks:
+            file: "/tmp/test_remediation_tasks_{{ inventory_hostname }}.yml"
+            apply:
+              ignore_errors: true
 
-    - name: Save full remediation log
-      ansible.builtin.copy:
-        dest: "{{ test_dir }}/remediation_full.log"
-        content: |
-          EXIT CODE: {{ full_remediation.rc }}
+        - name: Run AFTER scan
+          ansible.builtin.command: >
+            oscap xccdf eval
+            --profile {{ stig_profile_id }}
+            --results "{{ test_dir }}/after.xml"
+            --report "{{ test_dir }}/after.html"
+            "{{ scap_ds_path }}"
+          register: after_scan
+          failed_when: false
+          changed_when: false
 
-          STDOUT:
-          {{ full_remediation.stdout }}
+        - name: Get AFTER score natively
+          ansible.builtin.include_tasks: "{{ playbook_dir }}/../../roles/rhel_stig_with_rollback/tasks/parse_oscap_score.yml"
+          vars:
+            oscap_xml_file: "{{ test_dir }}/after.xml"
 
-          STDERR:
-          {{ full_remediation.stderr }}
-        mode: '0644'
-      when: full_remediation is not skipped
-
-    - name: Display remediation result
-      ansible.builtin.debug:
-        msg:
-          - "========================================================================="
-          - "REMEDIATION EXECUTION COMPLETE"
-          - "========================================================================="
-          - "Exit Code: {{ full_remediation.rc }}"
-          - "  0 = Success"
-          - "  2 = Some fixes applied, some failed (NORMAL)"
-          - "  Other = Error"
-          - ""
-          - "Log saved to: {{ test_dir }}/remediation_full.log"
-          - "========================================================================="
-      when: full_remediation is not skipped
-
-    - name: Run AFTER scan
-      ansible.builtin.command: >
-        oscap xccdf eval
-        --profile {{ stig_profile_id }}
-        --results "{{ test_dir }}/after.xml"
-        --report "{{ test_dir }}/after.html"
-        "{{ scap_ds_path }}"
-      register: after_scan
-      failed_when: false
-      changed_when: false
-      when: full_remediation is not skipped
-
-    - name: Get AFTER score
-      ansible.builtin.command: "{{ test_dir }}/parse_oscap_score.py {{ test_dir }}/after.xml"
-      register: after_score
-      changed_when: false
-      failed_when: false
-      when: full_remediation is not skipped
-
-    - name: Calculate improvement
-      ansible.builtin.set_fact:
-        improvement: "{{ (after_score.stdout | float) - (before_score.stdout | float) }}"
-      when: full_remediation is not skipped
-
-    - name: Display FINAL results
-      ansible.builtin.debug:
-        msg:
-          - "========================================================================="
-          - "FINAL RESULTS"
-          - "========================================================================="
-          - "BEFORE Compliance: {{ before_score.stdout }}%"
-          - "AFTER Compliance:  {{ after_score.stdout }}%"
-          - "Improvement:       +{{ improvement }}%"
-          - ""
-          - "Reports:"
-          - "  Before:  {{ test_dir }}/before.html"
-          - "  After:   {{ test_dir }}/after.html"
-          - ""
-          - "DIAGNOSIS:"
-          - >-
-            {{ '✓ REMEDIATION WORKING! Significant improvement detected'
-               if improvement | float > 20
-               else '~ Partial improvement - some security controls applied'
-               if improvement | float > 5
-               else '✗ NO IMPROVEMENT - remediation not working correctly' }}
-          - "{{ '  Check remediation log: ' ~ test_dir ~ '/remediation_full.log' if improvement | float <= 5 else '' }}"
-          - "========================================================================="
-      when: full_remediation is not skipped
+        - name: Display FINAL results
+          ansible.builtin.debug:
+            msg:
+              - "========================================================================="
+              - "BEFORE Compliance: {{ before_score_val }}%"
+              - "AFTER Compliance:  {{ rhel_stig_with_rollback_oscap_compliance_score }}%"
+              - "Improvement:       +{{ ((rhel_stig_with_rollback_oscap_compliance_score | float) - (before_score_val | float)) | round(2) }}%"
+              - "========================================================================="
+      always:
+        - name: Clean up controller temp files
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - "/tmp/test_remediation_{{ inventory_hostname }}.yml"
+            - "/tmp/test_remediation_tasks_{{ inventory_hostname }}.yml"
+          delegate_to: localhost
+          become: false

@@ -1,22 +1,20 @@
 ---
+# Comprehensive RHEL DISA STIG Security Audit (100% Native Ansible - Zero Python Scripts)
 - name: Comprehensive RHEL DISA STIG Security Audit
   hosts: all
   become: true
   gather_facts: true
+
   tasks:
+    #########################################################################
+    # PHASE 1: ENVIRONMENT & ENGINE PREPARATION
+    #########################################################################
 
-#########################################################################
-
-# PHASE 1: ENVIRONMENT & ENGINE PREPARATION
-
-#########################################################################
-
-    - name: Ensure OpenSCAP scanner and dependencies are installed
+    - name: Ensure OpenSCAP scanner and native XML dependencies are installed
       ansible.builtin.dnf:
         name:
           - openscap-scanner
           - scap-security-guide
-          - python3
           - python3-lxml
         state: present
         update_cache: false
@@ -40,9 +38,8 @@
     - name: Set clean, predictable audit filenames
       ansible.builtin.set_fact:
         audit_date: "{{ ansible_date_time.date }}"
-        results_xml_name: "rhel{{ ansible_distribution_major_version }}_stig_results_{{ inventory_hostname }}{{ ansible_date_time.date }}.xml"
-        report_html_name: "rhel{{ ansible_distribution_major_version }}_stig_results{{ inventory_hostname }}{{ ansible_date_time.date }}.html"
-        summary_json_name: "rhel{{ ansible_distribution_major_version }}_stig_results{{ inventory_hostname }}_{{ ansible_date_time.date }}.json"
+        results_xml_name: "rhel{{ ansible_distribution_major_version }}_stig_results_{{ inventory_hostname }}_{{ ansible_date_time.date }}.xml"
+        report_html_name: "rhel{{ ansible_distribution_major_version }}_stig_results_{{ inventory_hostname }}_{{ ansible_date_time.date }}.html"
 
     - name: Verify RHEL SCAP Data Stream exists
       ansible.builtin.stat:
@@ -50,201 +47,75 @@
       register: ds_stat
       failed_when: not ds_stat.stat.exists
 
-#########################################################################
-
-# PHASE 2: EXECUTE DISA STIG AUDIT
-
-#########################################################################
+    #########################################################################
+    # PHASE 2: EXECUTE DISA STIG AUDIT
+    #########################################################################
 
     - name: Execute full DISA STIG audit (evaluates all controls)
       ansible.builtin.command: >
         oscap xccdf eval
         --profile {{ stig_profile_id }}
-        --results-arf {{ stig_audit_dir }}/{{ results_xml_name }}
+        --results {{ stig_audit_dir }}/{{ results_xml_name }}
         --report {{ stig_audit_dir }}/{{ report_html_name }}
         {{ scap_ds_path }}
       register: oscap_exec
-
-    # RC 0 = All Pass; RC 2 = Failures Detected (Standard during compliance scans)
-
       failed_when: oscap_exec.rc not in [0, 2]
       changed_when: false
 
-##########################################################################
-# PHASE 3: PARSE XML RESULTS & EXTRACT FAILED CONTROL DETAILS
-##########################################################################
+    #########################################################################
+    # PHASE 3: PARSE XML RESULTS WITH NATIVE ANSIBLE
+    #########################################################################
 
-    - name: Parse comprehensive rule results and extract failed control details
-      ansible.builtin.shell: |
-        python3 - << 'EOF'
-        import sys
-        import os
-        import json
-        import xml.etree.ElementTree as ET
-        results_xml = os.environ.get("RESULTS_XML")
-        output_json = os.environ.get("OUTPUT_JSON")
+    - name: Parse OSCAP score natively
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/rhel_stig_with_rollback/tasks/parse_oscap_score.yml"
+      vars:
+        oscap_xml_file: "{{ stig_audit_dir }}/{{ results_xml_name }}"
 
-        if not results_xml or not os.path.exists(results_xml):
-          sys.stderr.write(f"CRITICAL ERROR: Results file not found at: '{results_xml}'\n")
-          sys.exit(1)
+    - name: Parse OSCAP failures by CAT I/II/III natively
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/rhel_stig_with_rollback/tasks/parse_oscap_failures.yml"
+      vars:
+        oscap_xml_file: "{{ stig_audit_dir }}/{{ results_xml_name }}"
 
-        try:
-          tree = ET.parse(results_xml)
-          root = tree.getroot()
-        except Exception as e:
-          sys.stderr.write(f"CRITICAL ERROR: Failed to parse XML file '{results_xml}': {e}\n")
-          sys.exit(1)
-
-        ns = {
-          'xccdf': 'http://checklists.nist.gov/xccdf/1.2',
-          'arf': 'http://scap.nist.gov/schema/asset-reporting-format/1.1'
-        }
-        # Pre-build lookup table for Rule metadata (STIG ID, Title)
-        rule_meta = {}
-        for rule in root.findall('.//xccdf:Rule', ns):
-          rid = rule.get('id')
-          if not rid:
-            continue
-
-          title_elem = rule.find('xccdf:title', ns)
-          title_text = title_elem.text.strip() if title_elem is not None and title_elem.text else ""
-
-          disa_id = ""
-          for ident in rule.findall('xccdf:ident', ns):
-            ident_system = ident.get('system', '').lower()
-            if 'stig' in ident_system or 'disa' in ident_system:
-              disa_id = ident.text.strip() if ident.text else ""
-              break
-            elif not disa_id and ident.text:
-              disa_id = ident.text.strip()
-
-          rule_meta[rid] = {
-            "title": title_text,
-            "disa_id": disa_id
-        }
-
-        summary = {
-            "total_rules": 0,
-            "pass": 0,
-            "fail": 0,
-            "notapplicable": 0,
-            "error": 0,
-            "score": 0.0,
-            "cat1_failed": [],
-            "cat2_failed": [],
-            "cat3_failed": [],
-            "cat_counts": {
-                "cat1": {"pass": 0, "fail": 0},
-                "cat2": {"pass": 0, "fail": 0},
-                "cat3": {"pass": 0, "fail": 0}
-            }
-        }
-
-        score_elem = root.find('.//xccdf:score', ns)
-        if score_elem is not None and score_elem.text:
-          try:
-            summary["score"] = round(float(score_elem.text), 2)
-          except ValueError:
-            pass
-
-        for rule_result in root.findall('.//xccdf:rule-result', ns):
-            summary["total_rules"] += 1
-            rule_id = rule_result.get('idref', '')
-            severity = rule_result.get('severity', 'medium').lower()
-            res_elem = rule_result.find('xccdf:result', ns)
-            result = res_elem.text if res_elem is not None else 'unknown'
-
-            cat = "cat2"
-            if severity == "high":
-                cat = "cat1"
-            elif severity == "low":
-                cat = "cat3"
-
-            if result == 'pass':
-                summary["pass"] += 1
-                summary["cat_counts"][cat]["pass"] += 1
-            elif result == 'fail':
-                summary["fail"] += 1
-                summary["cat_counts"][cat]["fail"] += 1
-
-                clean_rule_name = rule_id.replace("xccdf_org.ssgproject.content_rule_", "")
-                meta = rule_meta.get(rule_id, {})
-                title = meta.get("title", "")
-                disa_id = meta.get("disa_id", "")
-
-                if disa_id and title:
-                    display_str = f"[{disa_id}] {clean_rule_name} — {title}"
-                elif title:
-                    display_str = f"{clean_rule_name} — {title}"
-                else:
-                    display_str = clean_rule_name
-
-                finding_info = {
-                    "rule": clean_rule_name,
-                    "disa_id": disa_id,
-                    "title": title,
-                    "severity": severity.upper(),
-                    "display": display_str
-                }
-
-                if cat == "cat1":
-                    summary["cat1_failed"].append(finding_info)
-                elif cat == "cat2":
-                    summary["cat2_failed"].append(finding_info)
-                elif cat == "cat3":
-                    summary["cat3_failed"].append(finding_info)
-            elif result == 'notapplicable':
-                summary["notapplicable"] += 1
-            else:
-                summary["error"] += 1
-
-        with open(output_json, 'w') as f:
-          json.dump(summary, f, indent=2)
-        EOF
-      environment:
-        RESULTS_XML: "{{ stig_audit_dir }}/{{ results_xml_name }}"
-        OUTPUT_JSON: "{{ stig_audit_dir }}/{{ summary_json_name }}"
-      args:
-        executable: /bin/bash
-      changed_when: false
-
-    - name: Slurp parsed audit results
-      ansible.builtin.slurp:
-        src: "{{ stig_audit_dir }}/{{ summary_json_name }}"
-      register: slurped_summary
-
-    - name: Set audit facts from parsed data
+    - name: Build normalized audit summary fact
       ansible.builtin.set_fact:
-        audit_summary: "{{ slurped_summary.content | b64decode | from_json }}"
+        audit_summary:
+          score: "{{ rhel_stig_with_rollback_oscap_compliance_score | default('0.0') }}"
+          total_rules: "{{ rhel_stig_with_rollback_oscap_checked_rules | default(0) }}"
+          pass: "{{ rhel_stig_with_rollback_oscap_pass_count | default(0) }}"
+          fail: "{{ rhel_stig_with_rollback_oscap_fail_count | default(0) }}"
+          notapplicable: "{{ rhel_stig_with_rollback_oscap_notapplicable_count | default(0) }}"
+          cat1_failed: "{{ rhel_stig_with_rollback_oscap_failures.cat1 | default([]) }}"
+          cat2_failed: "{{ rhel_stig_with_rollback_oscap_failures.cat2 | default([]) }}"
+          cat3_failed: "{{ rhel_stig_with_rollback_oscap_failures.cat3 | default([]) }}"
 
-##########################################################################
-# PHASE 4: AUDIT REPORTING & DASHBOARDS
-##########################################################################
+    #########################################################################
+    # PHASE 4: AUDIT REPORTING & DASHBOARDS
+    #########################################################################
 
     - name: Display DISA STIG Executive Overview Dashboard
       ansible.builtin.debug:
         msg:
           - "========================================================================="
-          - "       RHEL {{ ansible_distribution_major_version }} DISA STIG 100% COMPLIANCE AUDIT DASHBOARD"
+          - "       RHEL {{ ansible_distribution_major_version }} DISA STIG COMPLIANCE AUDIT DASHBOARD"
           - "========================================================================="
           - "Target Host            : {{ inventory_hostname }}"
           - "RHEL Version           : {{ ansible_distribution_version }}"
           - "Audit Date             : {{ audit_date }}"
           - "Benchmark Profile      : DISA STIG (ssg-rhel{{ ansible_distribution_major_version }}-ds.xml)"
           - "Compliance Score       : {{ audit_summary.score }}%"
-          - "Total Controls Evaluated: {{ audit_summary.total_rules }}"
+          - "Checked Controls       : {{ audit_summary.total_rules }}"
           - "Passed Rules           : {{ audit_summary.pass }}"
           - "Failed Rules           : {{ audit_summary.fail }}"
           - "Not Applicable (N/A)   : {{ audit_summary.notapplicable }}"
           - "-------------------------------------------------------------------------"
           - " SEVERITY BREAKDOWN (DOD CATEGORIES):"
-          - "  CAT I   (High/Critical) : PASS: {{ audit_summary.cat_counts.cat1.pass }} | FAIL: {{ audit_summary.cat_counts.cat1.fail }}"
-          - "  CAT II  (Medium)        : PASS: {{ audit_summary.cat_counts.cat2.pass }} | FAIL: {{ audit_summary.cat_counts.cat2.fail }}"
-          - "  CAT III (Low)           : PASS: {{ audit_summary.cat_counts.cat3.pass }} | FAIL: {{ audit_summary.cat_counts.cat3.fail }}"
+          - "  CAT I   (High/Critical) : FAIL: {{ audit_summary.cat1_failed | length }}"
+          - "  CAT II  (Medium)        : FAIL: {{ audit_summary.cat2_failed | length }}"
+          - "  CAT III (Low)           : FAIL: {{ audit_summary.cat3_failed | length }}"
           - "-------------------------------------------------------------------------"
           - "Artifacts on Target Host:"
           - "  HTML Checklist Report : {{ stig_audit_dir }}/{{ report_html_name }}"
-          - "  ARF XML Results       : {{ stig_audit_dir }}/{{ results_xml_name }}"
+          - "  XML Results           : {{ stig_audit_dir }}/{{ results_xml_name }}"
           - "========================================================================="
 
     - name: Display Failed CAT I Controls (High Severity)
@@ -253,7 +124,7 @@
           - "========================================================================="
           - " FAILED CAT I CONTROLS (HIGH SEVERITY) — Total: {{ audit_summary.cat1_failed | length }}"
           - "========================================================================="
-          - "{{ audit_summary.cat1_failed | map(attribute='display') | list
+          - "{{ audit_summary.cat1_failed | map(attribute='id') | list
                if audit_summary.cat1_failed | length > 0 else ['✓ Zero CAT I failures found!'] }}"
 
     - name: Display Failed CAT II Controls (Medium Severity)
@@ -262,7 +133,7 @@
           - "========================================================================="
           - " FAILED CAT II CONTROLS (MEDIUM SEVERITY) — Total: {{ audit_summary.cat2_failed | length }}"
           - "========================================================================="
-          - "{{ audit_summary.cat2_failed | map(attribute='display') | list
+          - "{{ audit_summary.cat2_failed | map(attribute='id') | list
                if audit_summary.cat2_failed | length > 0 else ['✓ Zero CAT II failures found!'] }}"
 
     - name: Display Failed CAT III Controls (Low Severity)
@@ -271,22 +142,5 @@
           - "========================================================================="
           - " FAILED CAT III CONTROLS (LOW SEVERITY) — Total: {{ audit_summary.cat3_failed | length }}"
           - "========================================================================="
-          - "{{ audit_summary.cat3_failed | map(attribute='display') | list if audit_summary.cat3_failed
-           | length > 0 else ['✓ Zero CAT III failures found!'] }}"
-
-##########################################################################
-# PHASE 5: EMAIL RESULTS
-##########################################################################
-   # - name: Email results as html
-   #   community.general.mail:
-   #     to: "{{ report_reciepient_list }}"
-   #     host: "mailout.DOMAIN_NAME"
-   #     port: 25
-   #     from: "aapnotifications@uscis@DOMAIN_NAME"
-   #     subject: "RHEL 8 DISA STIG Audit Results for {{ inventory_hostname }}"
-   #     body: "Please find the attached HTML report for the recent DISA STIG audit."
-   #     attach:
-   #       - "{{ stig_audit_dir }}/{{ report_html_name }}"
-   #     subtype: "html"
-   #   delegate_to: localhost
-   #   when: inventory_hostname == ansible_play_hosts_all[0]
+          - "{{ audit_summary.cat3_failed | map(attribute='id') | list
+               if audit_summary.cat3_failed | length > 0 else ['✓ Zero CAT III failures found!'] }}"

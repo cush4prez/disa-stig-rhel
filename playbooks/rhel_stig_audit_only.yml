@@ -1,4 +1,5 @@
 ---
+# Audit-Only Playbook (100% Native Ansible - Zero Python Scripts)
 - name: RHEL DISA STIG Audit Only (NO REMEDIATIONS)
   hosts: all
   become: true
@@ -47,23 +48,10 @@
       failed_when: false
       changed_when: false
 
-    - name: Create work directory
-      ansible.builtin.file:
-        path: "{{ stig_work_dir }}"
-        state: directory
-        mode: '0750'
-
-    - name: Copy parse script to work directory
-      ansible.builtin.copy:
-        content: "{{ lookup('file', playbook_dir ~ '/../files/parse_oscap_score.py') }}"
-        dest: "{{ stig_work_dir }}/parse_oscap_score.py"
-        mode: '0755'
-
-    - name: Parse audit results
-      ansible.builtin.command: "{{ stig_work_dir }}/parse_oscap_score.py {{ stig_audit_dir }}/audit_{{ backup_timestamp }}.xml"
-      register: audit_score
-      changed_when: false
-      failed_when: false
+    - name: Parse audit results with native Ansible
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../roles/rhel_stig_with_rollback/tasks/parse_oscap_score.yml"
+      vars:
+        oscap_xml_file: "{{ stig_audit_dir }}/audit_{{ backup_timestamp }}.xml"
 
     - name: Display audit results
       ansible.builtin.debug:
@@ -73,7 +61,7 @@
           - "========================================================================="
           - "Target Host            : {{ inventory_hostname }}"
           - "RHEL Version           : {{ ansible_distribution_version }}"
-          - "STIG Compliance        : {{ audit_score.stdout | default('Unknown') }}%"
+          - "STIG Compliance        : {{ rhel_stig_with_rollback_oscap_compliance_score | default('Unknown') }}%"
           - "-------------------------------------------------------------------------"
           - "Audit Report           : {{ stig_audit_dir }}/audit_{{ backup_timestamp }}.html"
           - "Audit Results XML      : {{ stig_audit_dir }}/audit_{{ backup_timestamp }}.xml"
@@ -81,12 +69,9 @@
           - ""
           - "NO CHANGES WERE MADE TO THE SYSTEM"
           - ""
-          - "To view detailed results:"
-          - "  firefox {{ stig_audit_dir }}/audit_{{ backup_timestamp }}.html"
-          - ""
-          - "To generate remediation script (review before running):"
-          - "  oscap xccdf generate fix --fix-type bash \\"
-          - "    --result-id '' \\"
-          - "    {{ stig_audit_dir }}/audit_{{ backup_timestamp }}.xml \\"
-          - "    > /tmp/remediation_review.sh"
+          - "To generate Ansible remediation playbook for review:"
+          - '  oscap xccdf generate fix --fix-type ansible \\'
+          - '    --profile {{ stig_profile_id }} \\'
+          - '    --output /tmp/remediation_review.yml \\'
+          - '    {{ scap_ds_path }}'
           - "========================================================================="
