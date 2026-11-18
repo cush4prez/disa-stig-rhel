@@ -89,6 +89,14 @@ The file `docs/aap_survey_configuration.json` is provided as a **reference only*
 - **Default**: `true`
 - **Required**: Yes
 
+#### Question 5: Tailoring Profile (optional)
+- **Variable Name**: `rhel_stig_with_rollback_tailoring_profile`
+- **Question**: Tailoring Profile (optional)
+- **Description**: Organization-specific tailoring profile name. Leave blank for DISA defaults.
+- **Answer Type**: text
+- **Default**: (blank)
+- **Required**: No
+
 ### Step 2: Configure the Job Template
 
 - **Playbook**: `playbooks/rhel_stig_with_rollback.yml`
